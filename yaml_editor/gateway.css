@@ -1,0 +1,185 @@
+/* ============================================================
+   ESP32 ESP-NOW RECEIVER
+   CUSTOM ESPHOME WEB DASHBOARD
+
+   ON  = GREEN
+   OFF = RED
+   ============================================================ */
+
+
+/* ------------------------------------------------------------
+   PAGE
+   ------------------------------------------------------------ */
+
+body {
+    background: #10151c !important;
+    color: #f0f4f8 !important;
+    font-family:
+        Arial,
+        Helvetica,
+        sans-serif !important;
+}
+
+
+/* ------------------------------------------------------------
+   MAIN PAGE CONTAINER
+   ------------------------------------------------------------ */
+
+main {
+    max-width: 1200px !important;
+    margin: auto !important;
+}
+
+
+/* ------------------------------------------------------------
+   TITLE / DEVICE HEADER
+   ------------------------------------------------------------ */
+
+h1,
+h2,
+h3 {
+    color: #f5f7fa !important;
+}
+
+
+/* ------------------------------------------------------------
+   ENTITY CARDS
+   ------------------------------------------------------------ */
+
+section,
+article,
+.card {
+    border-radius: 10px !important;
+}
+
+
+/* ------------------------------------------------------------
+   GENERAL BINARY SENSOR STATE
+   ------------------------------------------------------------ */
+
+.binary_sensor .state,
+.binary-sensor .state {
+    min-width: 80px !important;
+
+    padding: 7px 15px !important;
+
+    border-radius: 8px !important;
+
+    font-size: 16px !important;
+
+    font-weight: 700 !important;
+
+    text-align: center !important;
+
+    color: white !important;
+}
+
+
+/* ============================================================
+   ON STATE
+   ============================================================ */
+
+
+/*
+   ESPHome Web Server variants can expose the value using
+   slightly different DOM attributes.
+
+   These selectors therefore cover the common representations.
+*/
+
+
+/* ON via text state */
+
+.binary_sensor [data-state="ON"],
+.binary-sensor [data-state="ON"],
+
+/* ON via boolean value */
+
+.binary_sensor [data-value="true"],
+.binary-sensor [data-value="true"],
+
+/* generic ESPHome entity state */
+
+[data-domain="binary_sensor"][data-state="ON"],
+[data-domain="binary_sensor"][data-value="true"] {
+
+    background: #16833b !important;
+
+    background-color: #16833b !important;
+
+    color: #ffffff !important;
+
+    border: 2px solid #22b455 !important;
+
+    border-radius: 8px !important;
+
+    font-weight: 700 !important;
+
+    padding: 7px 15px !important;
+}
+
+
+/* ============================================================
+   OFF STATE
+   ============================================================ */
+
+
+/* OFF via text state */
+
+.binary_sensor [data-state="OFF"],
+.binary-sensor [data-state="OFF"],
+
+/* OFF via boolean value */
+
+.binary_sensor [data-value="false"],
+.binary-sensor [data-value="false"],
+
+/* generic ESPHome entity state */
+
+[data-domain="binary_sensor"][data-state="OFF"],
+[data-domain="binary_sensor"][data-value="false"] {
+
+    background: #c62828 !important;
+
+    background-color: #c62828 !important;
+
+    color: #ffffff !important;
+
+    border: 2px solid #ef5350 !important;
+
+    border-radius: 8px !important;
+
+    font-weight: 700 !important;
+
+    padding: 7px 15px !important;
+}
+
+
+/* ------------------------------------------------------------
+   ENTITY NAMES
+   ------------------------------------------------------------ */
+
+.name,
+.entity-name {
+
+    font-size: 15px !important;
+
+    font-weight: 600 !important;
+
+    color: #e8edf3 !important;
+}
+
+
+/* ------------------------------------------------------------
+   CARD SPACING
+   ------------------------------------------------------------ */
+
+.entity-row,
+.entity {
+
+    margin-bottom: 5px !important;
+
+    padding-top: 4px !important;
+
+    padding-bottom: 4px !important;
+}

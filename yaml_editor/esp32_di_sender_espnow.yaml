@@ -1,0 +1,303 @@
+# -------------------------------------------------------------
+# BOARD 1: ESP-NOW TRANSMITTER (Reads 18 DIs & Sends to Board 2)
+# MAC Address: 8C:94:DF:B9:C5:64
+# -------------------------------------------------------------
+esphome:
+  name: esp32-di-transmitter
+  friendly_name: "ESP32 DI Transmitter"
+  includes:
+    - esp_now_sender.h
+
+esp32:
+  board: esp32dev
+  framework:
+    type: arduino
+
+logger:
+  level: DEBUG
+
+# Multi-Network Wi-Fi configuration (Primary H824, Secondary Pulse_Staff / 10.x)
+wifi:
+  networks:
+    - ssid: "H824"
+      password: "gw202001"
+      priority: 10.0
+    - ssid: "Pulse_Staff"
+      password: "Pulse@1234"
+      priority: 5.0
+  fast_connect: true
+  on_connect:
+    then:
+      - lambda: |-
+          if (global_esp_now_sender == nullptr) {
+            global_esp_now_sender = new ESPNowSenderComponent();
+            global_esp_now_sender->setup();
+          }
+
+  ap:
+    ssid: "ESP32-Sender-Fallback"
+    password: "fallbackpassword"
+
+captive_portal:
+mdns:
+
+# Web Server (Version 2 - Embedded Real-Time Auto-Refresh UI)
+web_server:
+  port: 80
+  version: 2
+  auth:
+    username: "admin"
+    password: "password123"
+
+status_led:
+  pin:
+    number: GPIO2
+    inverted: false
+
+# -------------------------------------------------------------
+# CONTINUOUS STATE SYNC ENGINE (2-Second Heartbeat)
+# Guarantees Board 2 is ALWAYS 100% in sync, even at boot!
+# -------------------------------------------------------------
+interval:
+  - interval: 2s
+    then:
+      - lambda: |-
+          send_esp_now_packet(id(di_01).state ? "DI_01:ON" : "DI_01:OFF");
+          send_esp_now_packet(id(di_02).state ? "DI_02:ON" : "DI_02:OFF");
+          send_esp_now_packet(id(di_03).state ? "DI_03:ON" : "DI_03:OFF");
+          send_esp_now_packet(id(di_04).state ? "DI_04:ON" : "DI_04:OFF");
+          send_esp_now_packet(id(di_05).state ? "DI_05:ON" : "DI_05:OFF");
+          send_esp_now_packet(id(di_06).state ? "DI_06:ON" : "DI_06:OFF");
+          send_esp_now_packet(id(di_07).state ? "DI_07:ON" : "DI_07:OFF");
+          send_esp_now_packet(id(di_08).state ? "DI_08:ON" : "DI_08:OFF");
+          send_esp_now_packet(id(di_09).state ? "DI_09:ON" : "DI_09:OFF");
+          send_esp_now_packet(id(di_10).state ? "DI_10:ON" : "DI_10:OFF");
+          send_esp_now_packet(id(di_11).state ? "DI_11:ON" : "DI_11:OFF");
+          send_esp_now_packet(id(di_12).state ? "DI_12:ON" : "DI_12:OFF");
+          send_esp_now_packet(id(di_13).state ? "DI_13:ON" : "DI_13:OFF");
+          send_esp_now_packet(id(di_14).state ? "DI_14:ON" : "DI_14:OFF");
+          send_esp_now_packet(id(di_15).state ? "DI_15:ON" : "DI_15:OFF");
+          send_esp_now_packet(id(di_16).state ? "DI_16:ON" : "DI_16:OFF");
+          send_esp_now_packet(id(di_17).state ? "DI_17:ON" : "DI_17:OFF");
+          send_esp_now_packet(id(di_18).state ? "DI_18:ON" : "DI_18:OFF");
+
+# -------------------------------------------------------------
+# 18 DIGITAL INPUTS with 2-Second Hold Filter
+# -------------------------------------------------------------
+binary_sensor:
+
+  - platform: gpio
+    pin: { number: GPIO4, mode: INPUT_PULLUP, inverted: true }
+    name: "DI 01 | Pin L05 (D4 / GPIO04)"
+    id: di_01
+    filters:
+      - delayed_on: 50ms
+      - delayed_off: 2s
+    on_state:
+      then:
+        - lambda: |-
+            send_esp_now_packet(x ? "DI_01:ON" : "DI_01:OFF");
+
+  - platform: gpio
+    pin: { number: GPIO5, mode: INPUT_PULLUP, inverted: true }
+    name: "DI 02 | Pin L08 (D5 / GPIO05)"
+    id: di_02
+    filters:
+      - delayed_on: 50ms
+      - delayed_off: 2s
+    on_state:
+      then:
+        - lambda: |-
+            send_esp_now_packet(x ? "DI_02:ON" : "DI_02:OFF");
+
+  - platform: gpio
+    pin: { number: GPIO12, mode: INPUT_PULLUP, inverted: true }
+    name: "DI 03 | Pin R04 (D12 / GPIO12)"
+    id: di_03
+    filters:
+      - delayed_on: 50ms
+      - delayed_off: 2s
+    on_state:
+      then:
+        - lambda: |-
+            send_esp_now_packet(x ? "DI_03:ON" : "DI_03:OFF");
+
+  - platform: gpio
+    pin: { number: GPIO13, mode: INPUT_PULLUP, inverted: true }
+    name: "DI 04 | Pin R03 (D13 / GPIO13)"
+    id: di_04
+    filters:
+      - delayed_on: 50ms
+      - delayed_off: 2s
+    on_state:
+      then:
+        - lambda: |-
+            send_esp_now_packet(x ? "DI_04:ON" : "DI_04:OFF");
+
+  - platform: gpio
+    pin: { number: GPIO14, mode: INPUT_PULLUP, inverted: true }
+    name: "DI 05 | Pin R05 (D14 / GPIO14)"
+    id: di_05
+    filters:
+      - delayed_on: 50ms
+      - delayed_off: 2s
+    on_state:
+      then:
+        - lambda: |-
+            send_esp_now_packet(x ? "DI_05:ON" : "DI_05:OFF");
+
+  - platform: gpio
+    pin: { number: GPIO15, mode: INPUT_PULLUP, inverted: true }
+    name: "DI 06 | Pin L03 (D15 / GPIO15)"
+    id: di_06
+    filters:
+      - delayed_on: 50ms
+      - delayed_off: 2s
+    on_state:
+      then:
+        - lambda: |-
+            send_esp_now_packet(x ? "DI_06:ON" : "DI_06:OFF");
+
+  - platform: gpio
+    pin: { number: GPIO16, mode: INPUT_PULLUP, inverted: true }
+    name: "DI 07 | Pin L06 (RX2 / GPIO16)"
+    id: di_07
+    filters:
+      - delayed_on: 50ms
+      - delayed_off: 2s
+    on_state:
+      then:
+        - lambda: |-
+            send_esp_now_packet(x ? "DI_07:ON" : "DI_07:OFF");
+
+  - platform: gpio
+    pin: { number: GPIO17, mode: INPUT_PULLUP, inverted: true }
+    name: "DI 08 | Pin L07 (TX2 / GPIO17)"
+    id: di_08
+    filters:
+      - delayed_on: 50ms
+      - delayed_off: 2s
+    on_state:
+      then:
+        - lambda: |-
+            send_esp_now_packet(x ? "DI_08:ON" : "DI_08:OFF");
+
+  - platform: gpio
+    pin: { number: GPIO18, mode: INPUT_PULLUP, inverted: true }
+    name: "DI 09 | Pin L09 (D18 / GPIO18)"
+    id: di_09
+    filters:
+      - delayed_on: 50ms
+      - delayed_off: 2s
+    on_state:
+      then:
+        - lambda: |-
+            send_esp_now_packet(x ? "DI_09:ON" : "DI_09:OFF");
+
+  - platform: gpio
+    pin: { number: GPIO19, mode: INPUT_PULLUP, inverted: true }
+    name: "DI 10 | Pin L10 (D19 / GPIO19)"
+    id: di_10
+    filters:
+      - delayed_on: 50ms
+      - delayed_off: 2s
+    on_state:
+      then:
+        - lambda: |-
+            send_esp_now_packet(x ? "DI_10:ON" : "DI_10:OFF");
+
+  - platform: gpio
+    pin: { number: GPIO21, mode: INPUT_PULLUP, inverted: true }
+    name: "DI 11 | Pin L11 (D21 / GPIO21)"
+    id: di_11
+    filters:
+      - delayed_on: 50ms
+      - delayed_off: 2s
+    on_state:
+      then:
+        - lambda: |-
+            send_esp_now_packet(x ? "DI_11:ON" : "DI_11:OFF");
+
+  - platform: gpio
+    pin: { number: GPIO22, mode: INPUT_PULLUP, inverted: true }
+    name: "DI 12 | Pin L14 (D22 / GPIO22)"
+    id: di_12
+    filters:
+      - delayed_on: 50ms
+      - delayed_off: 2s
+    on_state:
+      then:
+        - lambda: |-
+            send_esp_now_packet(x ? "DI_12:ON" : "DI_12:OFF");
+
+  - platform: gpio
+    pin: { number: GPIO23, mode: INPUT_PULLUP, inverted: true }
+    name: "DI 13 | Pin L15 (D23 / GPIO23)"
+    id: di_13
+    filters:
+      - delayed_on: 50ms
+      - delayed_off: 2s
+    on_state:
+      then:
+        - lambda: |-
+            send_esp_now_packet(x ? "DI_13:ON" : "DI_13:OFF");
+
+  - platform: gpio
+    pin: { number: GPIO25, mode: INPUT_PULLUP, inverted: true }
+    name: "DI 14 | Pin R08 (D25 / GPIO25)"
+    id: di_14
+    filters:
+      - delayed_on: 50ms
+      - delayed_off: 2s
+    on_state:
+      then:
+        - lambda: |-
+            send_esp_now_packet(x ? "DI_14:ON" : "DI_14:OFF");
+
+  - platform: gpio
+    pin: { number: GPIO26, mode: INPUT_PULLUP, inverted: true }
+    name: "DI 15 | Pin R07 (D26 / GPIO26)"
+    id: di_15
+    filters:
+      - delayed_on: 50ms
+      - delayed_off: 2s
+    on_state:
+      then:
+        - lambda: |-
+            send_esp_now_packet(x ? "DI_15:ON" : "DI_15:OFF");
+
+  - platform: gpio
+    pin: { number: GPIO27, mode: INPUT_PULLUP, inverted: true }
+    name: "DI 16 | Pin R06 (D27 / GPIO27)"
+    id: di_16
+    filters:
+      - delayed_on: 50ms
+      - delayed_off: 2s
+    on_state:
+      then:
+        - lambda: |-
+            send_esp_now_packet(x ? "DI_16:ON" : "DI_16:OFF");
+
+  - platform: gpio
+    pin: { number: GPIO32, mode: INPUT_PULLUP, inverted: true }
+    name: "DI 17 | Pin R10 (D32 / GPIO32)"
+    id: di_17
+    filters:
+      - delayed_on: 50ms
+      - delayed_off: 2s
+    on_state:
+      then:
+        - lambda: |-
+            send_esp_now_packet(x ? "DI_17:ON" : "DI_17:OFF");
+
+  - platform: gpio
+    pin: { number: GPIO33, mode: INPUT_PULLUP, inverted: true }
+    name: "DI 18 | Pin R09 (D33 / GPIO33)"
+    id: di_18
+    filters:
+      - delayed_on: 50ms
+      - delayed_off: 2s
+    on_state:
+      then:
+        - lambda: |-
+            send_esp_now_packet(x ? "DI_18:ON" : "DI_18:OFF");

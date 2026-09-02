@@ -1,0 +1,168 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ApexYAML Studio — ESPHome Multi-Node Editor</title>
+  <link rel="stylesheet" href="styles.css">
+  <!-- js-yaml library for browser-side YAML validation -->
+  <script src="https://cdn.jsdelivr.net/npm/js-yaml@4.1.0/dist/js-yaml.min.js"></script>
+</head>
+<body>
+
+  <!-- Fullscreen Drag & Drop Overlay Zone -->
+  <div class="drop-overlay" id="dropOverlay">
+    <div class="drop-modal">
+      <div class="drop-icon">📁</div>
+      <div class="drop-title">Drop YAML File to Edit</div>
+      <div class="drop-subtitle">Release file to load & validate automatically</div>
+    </div>
+  </div>
+
+  <!-- Top Header Navigation -->
+  <header>
+    <div class="brand">
+      <div class="brand-icon">⚡</div>
+      <div class="brand-title">ApexYAML Studio</div>
+      <div class="brand-badge">7" Display Suite</div>
+    </div>
+
+    <!-- Active File Control - Pre-Loaded Configurations -->
+    <div class="file-control">
+      <label for="fileSelect">Active Hardware Config:</label>
+      <select id="fileSelect">
+        <option value="/Users/gerhardwillemse/esphome_webserver_di.yaml">1. Single Board DI WebServer</option>
+        <option value="/Users/gerhardwillemse/yaml_editor/esp32_di_sender_espnow.yaml">2. Board 1: ESP-NOW Transmitter</option>
+        <option value="/Users/gerhardwillemse/yaml_editor/esp32_gateway_receiver_mqtt.yaml">3. Board 2: Receiver & MQTT Gateway</option>
+        <option value="/Users/gerhardwillemse/yaml_editor/esp32_7inch_display_receiver.yaml">4. 7" Visual Receiver Display</option>
+        <option value="custom">5. New Blank Configuration</option>
+      </select>
+    </div>
+
+    <!-- Top Action Buttons -->
+    <div class="action-buttons">
+      <button class="btn btn-secondary" id="btnValidate" title="Validate YAML Syntax">
+        <span>✓</span> Validate YAML
+      </button>
+      <button class="btn btn-accent" id="btnESPHomeConfig" title="Run ESPHome CLI Check">
+        <span>🔍</span> ESPHome Check
+      </button>
+      <button class="btn btn-flash" id="btnFlash" title="Compile and Flash directly to connected ESP32">
+        <span>⚡</span> Flash to ESP32
+      </button>
+      <button class="btn btn-primary" id="btnSave" title="Save directly to Mac file (⌘S)">
+        <span>💾</span> Save File
+      </button>
+    </div>
+  </header>
+
+  <!-- Workspace Container -->
+  <div class="workspace">
+
+    <!-- Left Sidebar Toolbar -->
+    <aside class="sidebar">
+
+      <!-- ESPHome Quick Snippets (Draggable) -->
+      <div class="panel-section">
+        <div class="section-title">
+          <span>🧩</span> Draggable Snippets
+        </div>
+        <div class="snippet-list">
+          <button class="snippet-btn" id="snipESPNowSender" draggable="true" title="Click or Drag onto Editor">
+            📡 ESP-NOW Transmitter Block
+            <span>Board 1</span>
+          </button>
+          <button class="snippet-btn" id="snipESPNowReceiver" draggable="true" title="Click or Drag onto Editor">
+            📻 ESP-NOW Receiver Block
+            <span>Board 2 / 7"</span>
+          </button>
+          <button class="snippet-btn" id="snipDualWiFi" draggable="true" title="Click or Drag onto Editor">
+            🌐 Dual Wi-Fi (H824 + 10.x)
+            <span>wifi</span>
+          </button>
+          <button class="snippet-btn" id="snipMQTTBroker" draggable="true" title="Click or Drag onto Editor">
+            📡 MQTT Broker Gateway
+            <span>mqtt</span>
+          </button>
+          <button class="snippet-btn" id="snipDigitalInput" draggable="true" title="Click or Drag onto Editor">
+            ➕ Digital Input (DI Pin)
+            <span>binary_sensor</span>
+          </button>
+          <button class="snippet-btn" id="snipWebServer" draggable="true" title="Click or Drag onto Editor">
+            ➕ WebServer v2 Component
+            <span>web_server</span>
+          </button>
+        </div>
+      </div>
+
+      <!-- Quick Actions -->
+      <div class="panel-section">
+        <div class="section-title">
+          <span>🛠️</span> Quick Tools
+        </div>
+        <div class="snippet-list">
+          <button class="snippet-btn" id="btnFormat">
+            ✨ Auto-Indent / Format
+          </button>
+          <button class="snippet-btn" id="btnCopy">
+            📋 Copy Code to Clipboard
+          </button>
+          <button class="snippet-btn" id="btnDownload">
+            ⬇️ Download .yaml File
+          </button>
+        </div>
+      </div>
+
+      <!-- Live YAML Status Card -->
+      <div class="panel-section">
+        <div class="section-title">
+          <span>🔍</span> Validation Status
+        </div>
+        <div class="status-card valid" id="statusCard">
+          <div class="status-header">
+            <div class="status-indicator"></div>
+            <span id="statusTitle">YAML Valid</span>
+          </div>
+          <div class="status-msg" id="statusMsg">No syntax errors detected.</div>
+        </div>
+      </div>
+
+    </aside>
+
+    <!-- Center Code Editor -->
+    <main class="editor-container">
+      <div class="editor-toolbar">
+        <div class="editor-stats">
+          <span id="statLines">Lines: 1</span>
+          <span id="statChars">Chars: 0</span>
+          <span id="statCursor">Ln 1, Col 1</span>
+        </div>
+        <div style="font-family: var(--font-code); font-size: 11px; color: var(--text-muted);">
+          Drag & Drop Files or Snippets | Press ⌘S to Save
+        </div>
+      </div>
+
+      <div class="editor-main">
+        <div class="line-numbers" id="lineNumbers">1</div>
+        <textarea class="code-editor" id="codeEditor" spellcheck="false" placeholder="Drag & Drop a .yaml file here or choose a configuration above..."></textarea>
+      </div>
+    </main>
+
+    <!-- Right Inspector / Console Panel -->
+    <aside class="inspector">
+      <div class="inspector-header">
+        <span>🖥️ Terminal / Flasher Console</span>
+      </div>
+      <div class="inspector-content" id="inspectorContent">
+ApexYAML Studio Ready. Select Option 4 to view & flash the 7" Visual Receiver Display!
+      </div>
+    </aside>
+
+  </div>
+
+  <!-- Toast Notification Container -->
+  <div class="toast-container" id="toastContainer"></div>
+
+  <script src="app.js"></script>
+</body>
+</html>

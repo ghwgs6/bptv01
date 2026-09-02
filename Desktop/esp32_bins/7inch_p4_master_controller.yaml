@@ -1,0 +1,946 @@
+substitutions:
+  device_name: esp32-p4-master-controller
+  friendly_name: "ESP32-P4 Master Controller"
+  mqtt_broker: "192.168.10.70"  # Verified IP of the Gateway / Cerbo MQTT broker (or 192.168.3.123)
+  portal_id: "c0619abbc855"     # Site Portal ID
+
+  # 7 Tank Device IDs
+  tank_1: "30"  # Main 60kL
+  tank_2: "28"  # Feed 10kL 1
+  tank_3: "29"  # Feed 10kL 2
+  tank_4: "27"  # DKR B1
+  tank_5: "26"  # DKR B2
+  tank_6: "25"  # DKR B3
+  tank_7: "24"  # DKR B4
+
+  # 4 DKR Bypass Device IDs
+  bypass_1: "20"
+  bypass_2: "21"
+  bypass_3: "22"
+  bypass_4: "23"
+
+  # 4 Digital Input (Pipe Alarm / Status) Device IDs
+  di_1: "1"
+  di_2: "2"
+  di_3: "3"
+  di_4: "4"
+
+esphome:
+  name: ${device_name}
+  friendly_name: ${friendly_name}
+
+esp32:
+  board: esp32-p4-evboard
+  variant: esp32p4
+  engineering_sample: true  # Required for ESP32-P4 silicon revision v1.3
+  framework:
+    type: esp-idf
+    advanced:
+      enable_idf_experimental_features: yes
+    sdkconfig_options:
+      CONFIG_SPIRAM_SPEED_120M: "y"
+      CONFIG_CACHE_L2_CACHE_256KB: "y"
+      CONFIG_CACHE_L2_CACHE_LINE_128B: "y"
+
+# Power regulators for ESP32-P4 MIPI-DSI & Peripherals
+esp_ldo:
+  - channel: 3
+    voltage: 2.5V
+  - channel: 4
+    voltage: 1.8V
+
+# PSRAM required for 1024x600 display framebuffer
+psram:
+  mode: hex
+  speed: 100MHZ
+
+# Backlight control for the 7" LCD
+output:
+  - platform: ledc
+    pin: GPIO23
+    id: gpio_backlight_pwm
+    frequency: 20kHz
+    zero_means_zero: true
+
+light:
+  - platform: monochromatic
+    output: gpio_backlight_pwm
+    name: "Display Backlight"
+    id: display_backlight
+    restore_mode: ALWAYS_ON
+
+# Logging
+logger:
+  level: INFO
+
+# Enable ESP32 Hosted co-processor for Wi-Fi
+esp32_hosted:
+  variant: ESP32C6
+  reset_pin: GPIO54
+  cmd_pin: GPIO19
+  clk_pin: GPIO18
+  d0_pin: GPIO14
+  d1_pin: GPIO15
+  d2_pin: GPIO16
+  d3_pin: GPIO17
+  active_high: true
+
+# Wireless Wi-Fi Configuration
+wifi:
+  ssid: "DKR Site B"
+  password: "W3ldhag3n"
+
+# Enable Home Assistant Native API
+api:
+
+# Enable Over-The-Air (OTA) updates
+ota:
+  - platform: esphome
+
+# Virtual status sensors for Home Assistant
+binary_sensor:
+  - platform: template
+    name: "Any Alarm State"
+    id: any_alarm_state
+    device_class: safety
+  - platform: template
+    name: "Any Bypassed State"
+    id: any_bypassed_state
+    device_class: problem
+
+# MQTT Client connecting to Gateway / Broker
+mqtt:
+  broker: ${mqtt_broker}
+  username: "mqtt"
+  password: "436023"
+  keepalive: 15s
+
+  on_connect:
+    then:
+      - logger.log: "Connected to MQTT Broker!"
+      - lambda: |-
+          id(mqtt_link_ok) = true;
+      # Request initial keepalive and parameters
+      - mqtt.publish:
+          topic: R/${portal_id}/keepalive
+          payload: ""
+      # Request initial updates for all 7 Tanks
+      - mqtt.publish:
+          topic: R/${portal_id}/tank/${tank_1}/Level
+          payload: ""
+      - mqtt.publish:
+          topic: R/${portal_id}/tank/${tank_2}/Level
+          payload: ""
+      - mqtt.publish:
+          topic: R/${portal_id}/tank/${tank_3}/Level
+          payload: ""
+      - mqtt.publish:
+          topic: R/${portal_id}/tank/${tank_4}/Level
+          payload: ""
+      - mqtt.publish:
+          topic: R/${portal_id}/tank/${tank_5}/Level
+          payload: ""
+      - mqtt.publish:
+          topic: R/${portal_id}/tank/${tank_6}/Level
+          payload: ""
+      - mqtt.publish:
+          topic: R/${portal_id}/tank/${tank_7}/Level
+          payload: ""
+      # Request initial updates for 4 Bypasses
+      - mqtt.publish:
+          topic: R/${portal_id}/tank/${bypass_1}/Level
+          payload: ""
+      - mqtt.publish:
+          topic: R/${portal_id}/tank/${bypass_2}/Level
+          payload: ""
+      - mqtt.publish:
+          topic: R/${portal_id}/tank/${bypass_3}/Level
+          payload: ""
+      - mqtt.publish:
+          topic: R/${portal_id}/tank/${bypass_4}/Level
+          payload: ""
+      # Request initial updates for Digital Inputs & Pipe Alarms
+      - mqtt.publish:
+          topic: R/${portal_id}/digitalinput/${di_1}/State
+          payload: ""
+      - mqtt.publish:
+          topic: R/${portal_id}/digitalinput/${di_2}/State
+          payload: ""
+      - mqtt.publish:
+          topic: R/${portal_id}/digitalinput/${di_3}/State
+          payload: ""
+      - mqtt.publish:
+          topic: R/${portal_id}/digitalinput/${di_4}/State
+          payload: ""
+      - mqtt.publish:
+          topic: R/${portal_id}/digitalinput/${di_1}/Alarm
+          payload: ""
+      - mqtt.publish:
+          topic: R/${portal_id}/digitalinput/${di_2}/Alarm
+          payload: ""
+      - mqtt.publish:
+          topic: R/${portal_id}/digitalinput/${di_3}/Alarm
+          payload: ""
+      - mqtt.publish:
+          topic: R/${portal_id}/digitalinput/${di_4}/Alarm
+          payload: ""
+      # Request initial updates for Relays
+      - mqtt.publish:
+          topic: R/${portal_id}/system/0/SwitchableOutput/0/State
+          payload: ""
+      - mqtt.publish:
+          topic: R/${portal_id}/system/0/SwitchableOutput/1/State
+          payload: ""
+
+  on_disconnect:
+    then:
+      - lambda: |-
+          id(mqtt_link_ok) = false;
+
+  # Subscriptions to JSON MQTT Topics
+  on_json_message:
+    # ---- 7 Tank Levels ----
+    - topic: N/${portal_id}/tank/${tank_1}/Level
+      then:
+        - lambda: 'if (!x["value"].isNull()) { id(cage_level)[0] = x["value"].as<float>(); id(cage_tank_connected)[0] = true; id(cage_last_tank_ms)[0] = millis(); } else { id(cage_tank_connected)[0] = false; }'
+    - topic: N/${portal_id}/tank/${tank_2}/Level
+      then:
+        - lambda: 'if (!x["value"].isNull()) { id(cage_level)[1] = x["value"].as<float>(); id(cage_tank_connected)[1] = true; id(cage_last_tank_ms)[1] = millis(); } else { id(cage_tank_connected)[1] = false; }'
+    - topic: N/${portal_id}/tank/${tank_3}/Level
+      then:
+        - lambda: 'if (!x["value"].isNull()) { id(cage_level)[2] = x["value"].as<float>(); id(cage_tank_connected)[2] = true; id(cage_last_tank_ms)[2] = millis(); } else { id(cage_tank_connected)[2] = false; }'
+    - topic: N/${portal_id}/tank/${tank_4}/Level
+      then:
+        - lambda: 'if (!x["value"].isNull()) { id(cage_level)[3] = x["value"].as<float>(); id(cage_tank_connected)[3] = true; id(cage_last_tank_ms)[3] = millis(); } else { id(cage_tank_connected)[3] = false; }'
+    - topic: N/${portal_id}/tank/${tank_5}/Level
+      then:
+        - lambda: 'if (!x["value"].isNull()) { id(cage_level)[4] = x["value"].as<float>(); id(cage_tank_connected)[4] = true; id(cage_last_tank_ms)[4] = millis(); } else { id(cage_tank_connected)[4] = false; }'
+    - topic: N/${portal_id}/tank/${tank_6}/Level
+      then:
+        - lambda: 'if (!x["value"].isNull()) { id(cage_level)[5] = x["value"].as<float>(); id(cage_tank_connected)[5] = true; id(cage_last_tank_ms)[5] = millis(); } else { id(cage_tank_connected)[5] = false; }'
+    - topic: N/${portal_id}/tank/${tank_7}/Level
+      then:
+        - lambda: 'if (!x["value"].isNull()) { id(cage_level)[6] = x["value"].as<float>(); id(cage_tank_connected)[6] = true; id(cage_last_tank_ms)[6] = millis(); } else { id(cage_tank_connected)[6] = false; }'
+
+    # ---- 7 Tank Remaining Volumes (m3 / Liters) ----
+    - topic: N/${portal_id}/tank/${tank_1}/Remaining
+      then:
+        - lambda: 'if (!x["value"].isNull()) { id(cage_remaining_m3)[0] = x["value"].as<float>(); id(cage_last_tank_ms)[0] = millis(); }'
+    - topic: N/${portal_id}/tank/${tank_2}/Remaining
+      then:
+        - lambda: 'if (!x["value"].isNull()) { id(cage_remaining_m3)[1] = x["value"].as<float>(); id(cage_last_tank_ms)[1] = millis(); }'
+    - topic: N/${portal_id}/tank/${tank_3}/Remaining
+      then:
+        - lambda: 'if (!x["value"].isNull()) { id(cage_remaining_m3)[2] = x["value"].as<float>(); id(cage_last_tank_ms)[2] = millis(); }'
+    - topic: N/${portal_id}/tank/${tank_4}/Remaining
+      then:
+        - lambda: 'if (!x["value"].isNull()) { id(cage_remaining_m3)[3] = x["value"].as<float>(); id(cage_last_tank_ms)[3] = millis(); }'
+    - topic: N/${portal_id}/tank/${tank_5}/Remaining
+      then:
+        - lambda: 'if (!x["value"].isNull()) { id(cage_remaining_m3)[4] = x["value"].as<float>(); id(cage_last_tank_ms)[4] = millis(); }'
+    - topic: N/${portal_id}/tank/${tank_6}/Remaining
+      then:
+        - lambda: 'if (!x["value"].isNull()) { id(cage_remaining_m3)[5] = x["value"].as<float>(); id(cage_last_tank_ms)[5] = millis(); }'
+    - topic: N/${portal_id}/tank/${tank_7}/Remaining
+      then:
+        - lambda: 'if (!x["value"].isNull()) { id(cage_remaining_m3)[6] = x["value"].as<float>(); id(cage_last_tank_ms)[6] = millis(); }'
+
+    # ---- 4 Digital Input States (Green for ON, Red for OFF) ----
+    - topic: N/${portal_id}/digitalinput/${di_1}/State
+      then:
+        - lambda: |-
+            if (!x["value"].isNull()) {
+              id(cage_di_state)[0] = (x["value"].as<int>() != 0);
+              id(cage_di_connected)[0] = true;
+              id(cage_last_di_ms)[0] = millis();
+            }
+    - topic: N/${portal_id}/digitalinput/${di_2}/State
+      then:
+        - lambda: |-
+            if (!x["value"].isNull()) {
+              id(cage_di_state)[1] = (x["value"].as<int>() != 0);
+              id(cage_di_connected)[1] = true;
+              id(cage_last_di_ms)[1] = millis();
+            }
+    - topic: N/${portal_id}/digitalinput/${di_3}/State
+      then:
+        - lambda: |-
+            if (!x["value"].isNull()) {
+              id(cage_di_state)[2] = (x["value"].as<int>() != 0);
+              id(cage_di_connected)[2] = true;
+              id(cage_last_di_ms)[2] = millis();
+            }
+    - topic: N/${portal_id}/digitalinput/${di_4}/State
+      then:
+        - lambda: |-
+            if (!x["value"].isNull()) {
+              id(cage_di_state)[3] = (x["value"].as<int>() != 0);
+              id(cage_di_connected)[3] = true;
+              id(cage_last_di_ms)[3] = millis();
+            }
+
+    # ---- 4 Pipe Alarms ----
+    - topic: N/${portal_id}/digitalinput/${di_1}/Alarm
+      then:
+        - lambda: |-
+            if (!x["value"].isNull()) {
+              int v = x["value"].as<int>();
+              id(cage_alarm)[0] = (v != 0);
+              id(cage_di_state)[0] = (v != 0);
+              id(cage_di_connected)[0] = true;
+              id(cage_last_di_ms)[0] = millis();
+            } else {
+              id(cage_di_connected)[0] = false;
+              id(cage_alarm)[0] = false;
+            }
+    - topic: N/${portal_id}/digitalinput/${di_2}/Alarm
+      then:
+        - lambda: |-
+            if (!x["value"].isNull()) {
+              int v = x["value"].as<int>();
+              id(cage_alarm)[1] = (v != 0);
+              id(cage_di_state)[1] = (v != 0);
+              id(cage_di_connected)[1] = true;
+              id(cage_last_di_ms)[1] = millis();
+            } else {
+              id(cage_di_connected)[1] = false;
+              id(cage_alarm)[1] = false;
+            }
+    - topic: N/${portal_id}/digitalinput/${di_3}/Alarm
+      then:
+        - lambda: |-
+            if (!x["value"].isNull()) {
+              int v = x["value"].as<int>();
+              id(cage_alarm)[2] = (v != 0);
+              id(cage_di_state)[2] = (v != 0);
+              id(cage_di_connected)[2] = true;
+              id(cage_last_di_ms)[2] = millis();
+            } else {
+              id(cage_di_connected)[2] = false;
+              id(cage_alarm)[2] = false;
+            }
+    - topic: N/${portal_id}/digitalinput/${di_4}/Alarm
+      then:
+        - lambda: |-
+            if (!x["value"].isNull()) {
+              int v = x["value"].as<int>();
+              id(cage_alarm)[3] = (v != 0);
+              id(cage_di_state)[3] = (v != 0);
+              id(cage_di_connected)[3] = true;
+              id(cage_last_di_ms)[3] = millis();
+            } else {
+              id(cage_di_connected)[3] = false;
+              id(cage_alarm)[3] = false;
+            }
+
+    # ---- 4 DKR Bypass Levels ----
+    - topic: N/${portal_id}/tank/${bypass_1}/Level
+      then:
+        - lambda: |-
+            if (!x["value"].isNull()) {
+              id(cage_bypass_level)[0] = x["value"].as<float>();
+              id(cage_bypass_connected)[0] = true;
+              id(cage_last_bypass_ms)[0] = millis();
+            } else {
+              id(cage_bypass_connected)[0] = false;
+            }
+            {
+              bool bp_ok = id(cage_bypass_connected)[0];
+              float bp_lvl = id(cage_bypass_level)[0];
+              id(cage_maintenance_mode)[0] = (bp_ok && bp_lvl == 0.0);
+              id(cage_wire_fault)[0] = (!bp_ok) ? true : (bp_lvl != 0.0 && bp_lvl != 99.0);
+            }
+    - topic: N/${portal_id}/tank/${bypass_2}/Level
+      then:
+        - lambda: |-
+            if (!x["value"].isNull()) {
+              id(cage_bypass_level)[1] = x["value"].as<float>();
+              id(cage_bypass_connected)[1] = true;
+              id(cage_last_bypass_ms)[1] = millis();
+            } else {
+              id(cage_bypass_connected)[1] = false;
+            }
+            {
+              bool bp_ok = id(cage_bypass_connected)[1];
+              float bp_lvl = id(cage_bypass_level)[1];
+              id(cage_maintenance_mode)[1] = (bp_ok && bp_lvl == 0.0);
+              id(cage_wire_fault)[1] = (!bp_ok) ? true : (bp_lvl != 0.0 && bp_lvl != 99.0);
+            }
+    - topic: N/${portal_id}/tank/${bypass_3}/Level
+      then:
+        - lambda: |-
+            if (!x["value"].isNull()) {
+              id(cage_bypass_level)[2] = x["value"].as<float>();
+              id(cage_bypass_connected)[2] = true;
+              id(cage_last_bypass_ms)[2] = millis();
+            } else {
+              id(cage_bypass_connected)[2] = false;
+            }
+            {
+              bool bp_ok = id(cage_bypass_connected)[2];
+              float bp_lvl = id(cage_bypass_level)[2];
+              id(cage_maintenance_mode)[2] = (bp_ok && bp_lvl == 0.0);
+              id(cage_wire_fault)[2] = (!bp_ok) ? true : (bp_lvl != 0.0 && bp_lvl != 99.0);
+            }
+    - topic: N/${portal_id}/tank/${bypass_4}/Level
+      then:
+        - lambda: |-
+            if (!x["value"].isNull()) {
+              id(cage_bypass_level)[3] = x["value"].as<float>();
+              id(cage_bypass_connected)[3] = true;
+              id(cage_last_bypass_ms)[3] = millis();
+            } else {
+              id(cage_bypass_connected)[3] = false;
+            }
+            {
+              bool bp_ok = id(cage_bypass_connected)[3];
+              float bp_lvl = id(cage_bypass_level)[3];
+              id(cage_maintenance_mode)[3] = (bp_ok && bp_lvl == 0.0);
+              id(cage_wire_fault)[3] = (!bp_ok) ? true : (bp_lvl != 0.0 && bp_lvl != 99.0);
+            }
+
+    # ---- 2 Relays ----
+    - topic: N/${portal_id}/system/0/SwitchableOutput/0/State
+      then:
+        - lambda: |-
+            if (!x["value"].isNull()) {
+              id(cerbo_relay_1_closed) = (x["value"].as<int>() == 1);
+              id(cerbo_relays_connected) = true;
+              id(cage_last_relay_ms) = millis();
+            }
+    - topic: N/${portal_id}/system/0/SwitchableOutput/1/State
+      then:
+        - lambda: |-
+            if (!x["value"].isNull()) {
+              id(cerbo_relay_2_closed) = (x["value"].as<int>() == 1);
+              id(cerbo_relays_connected) = true;
+              id(cage_last_relay_ms) = millis();
+            }
+
+globals:
+  - id: mqtt_link_ok
+    type: bool
+    initial_value: 'false'
+
+  # 7 Tank levels (%) and volumes (m3 / Liters)
+  - id: cage_level
+    type: float[7]
+    initial_value: '{0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0}'
+  - id: cage_remaining_m3
+    type: float[7]
+    initial_value: '{0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0}'
+  - id: cage_tank_connected
+    type: bool[7]
+    initial_value: '{false, false, false, false, false, false, false}'
+
+  # 4 DKR Bypass levels
+  - id: cage_bypass_level
+    type: float[4]
+    initial_value: '{-1.0, -1.0, -1.0, -1.0}'
+  - id: cage_bypass_connected
+    type: bool[4]
+    initial_value: '{false, false, false, false}'
+  - id: cage_maintenance_mode
+    type: bool[4]
+    initial_value: '{false, false, false, false}'
+  - id: cage_wire_fault
+    type: bool[4]
+    initial_value: '{false, false, false, false}'
+
+  # 4 Pipe Alarms
+  - id: cage_alarm
+    type: bool[4]
+    initial_value: '{false, false, false, false}'
+
+  # 4 Digital Inputs (Green for ON, Red for OFF)
+  - id: cage_di_state
+    type: bool[4]
+    initial_value: '{false, false, false, false}'
+  - id: cage_di_connected
+    type: bool[4]
+    initial_value: '{false, false, false, false}'
+
+  # 2 Relays
+  - id: cerbo_relay_1_closed
+    type: bool
+    initial_value: 'false'
+  - id: cerbo_relay_2_closed
+    type: bool
+    initial_value: 'false'
+  - id: cerbo_relays_connected
+    type: bool
+    initial_value: 'false'
+
+  # Message age millisecond timers
+  - id: cage_last_tank_ms
+    type: uint32_t[7]
+    initial_value: '{0, 0, 0, 0, 0, 0, 0}'
+  - id: cage_last_di_ms
+    type: uint32_t[4]
+    initial_value: '{0, 0, 0, 0}'
+  - id: cage_last_bypass_ms
+    type: uint32_t[4]
+    initial_value: '{0, 0, 0, 0}'
+  - id: cage_last_relay_ms
+    type: uint32_t
+    initial_value: '0'
+
+# Polling and keepalive intervals
+interval:
+  # MQTT Keepalive every 30 seconds
+  - interval: 30s
+    then:
+      - if:
+          condition:
+            mqtt.connected:
+          then:
+            - mqtt.publish:
+                topic: R/${portal_id}/keepalive
+                payload: '{ "keepalive-options" : ["suppress-republish"] }'
+
+  # Request register updates every 3 seconds to keep data fresh
+  - interval: 3s
+    then:
+      - if:
+          condition:
+            mqtt.connected:
+          then:
+            - mqtt.publish:
+                topic: R/${portal_id}/keepalive
+                payload: ""
+
+  # Check for data connection timeouts every 5 seconds
+  - interval: 5s
+    then:
+      - lambda: |-
+          uint32_t now = millis();
+          for (int i=0; i<7; i++) {
+            if (id(cage_last_tank_ms)[i] == 0 || (now - id(cage_last_tank_ms)[i]) > 15000) {
+              id(cage_tank_connected)[i] = false;
+            }
+          }
+          for (int i=0; i<4; i++) {
+            if (id(cage_last_bypass_ms)[i] == 0 || (now - id(cage_last_bypass_ms)[i]) > 15000) {
+              id(cage_bypass_connected)[i] = false;
+            }
+            bool bp_ok = id(cage_bypass_connected)[i];
+            float bp_lvl = id(cage_bypass_level)[i];
+            id(cage_maintenance_mode)[i] = (bp_ok && bp_lvl == 0.0);
+            id(cage_wire_fault)[i] = (!bp_ok) ? true : (bp_lvl != 0.0 && bp_lvl != 99.0);
+
+            if (id(cage_last_di_ms)[i] == 0 || (now - id(cage_last_di_ms)[i]) > 15000) {
+              id(cage_di_connected)[i] = false;
+              id(cage_alarm)[i] = false;
+            }
+          }
+          if (id(cage_last_relay_ms) == 0 || (now - id(cage_last_relay_ms)) > 15000) {
+            id(cerbo_relays_connected) = false;
+          }
+
+          // Calculate Any Alarm
+          bool alarm_active = false;
+          for (int i = 0; i < 4; i++) {
+            if (id(cage_alarm)[i]) {
+              alarm_active = true;
+              break;
+            }
+          }
+          id(any_alarm_state).publish_state(alarm_active);
+
+          // Calculate Any Bypassed
+          bool bypass_active = false;
+          for (int i = 0; i < 4; i++) {
+            if (id(cage_maintenance_mode)[i] || (id(cage_bypass_connected)[i] && id(cage_bypass_level)[i] >= 50.0f)) {
+              bypass_active = true;
+              break;
+            }
+          }
+          id(any_bypassed_state).publish_state(bypass_active);
+
+# High-Quality Typography
+font:
+  - file: 'gfonts://Roboto'
+    id: font_tiny
+    size: 11
+  - file: 'gfonts://Roboto'
+    id: font_small
+    size: 14
+  - file: 'gfonts://Roboto'
+    id: font_medium
+    size: 18
+  - file: 'gfonts://Roboto'
+    id: font_large
+    size: 24
+  - file: 'gfonts://Roboto'
+    id: font_header
+    size: 21
+
+# Color palette variables
+color:
+  - id: c_bg
+    red: 0.07
+    green: 0.08
+    blue: 0.10
+  - id: c_header
+    red: 0.07
+    green: 0.13
+    blue: 0.22
+  - id: c_border
+    red: 0.20
+    green: 0.22
+    blue: 0.27
+  - id: c_card_bg
+    red: 0.11
+    green: 0.12
+    blue: 0.16
+  - id: c_cyan
+    red: 0.0
+    green: 0.82
+    blue: 1.0
+  - id: c_green
+    red: 0.0
+    green: 0.90
+    blue: 0.31
+  - id: c_yellow
+    red: 1.0
+    green: 0.82
+    blue: 0.0
+  - id: c_orange
+    red: 0.95
+    green: 0.55
+    blue: 0.10
+  - id: c_red
+    red: 1.0
+    green: 0.25
+    blue: 0.25
+  - id: c_white
+    red: 1.0
+    green: 1.0
+    blue: 1.0
+  - id: c_gray
+    red: 0.70
+    green: 0.72
+    blue: 0.75
+  - id: c_muted
+    red: 0.45
+    green: 0.48
+    blue: 0.52
+
+# 7" 1024x600 Display Configuration
+display:
+  - platform: mipi_dsi
+    model: JC1060P470
+    id: my_display
+    reset_pin: GPIO05
+    dimensions:
+      width: 1024
+      height: 600
+    update_interval: 1s
+    lambda: |-
+      // --- COLOR DEFINITIONS ---
+      Color bg_color = id(c_bg);
+      Color header_color = id(c_header);
+      Color card_color = id(c_card_bg);
+      Color border_color = id(c_border);
+      Color text_white = id(c_white);
+      Color text_cyan = id(c_cyan);
+      Color text_gray = id(c_gray);
+      Color text_muted = id(c_muted);
+      
+      Color status_green = id(c_green);
+      Color status_yellow = id(c_yellow);
+      Color status_orange = id(c_orange);
+      Color status_red = id(c_red);
+
+      // 1. CLEAR SCREEN / DRAW BACKGROUND
+      it.fill(bg_color);
+
+      // 2. TOP BAR HEADER (y: 0 to 55)
+      it.filled_rectangle(0, 0, 1024, 55, header_color);
+      it.line(0, 55, 1024, 55, text_cyan);
+
+      // Header Title
+      it.print(15, 16, id(font_header), text_white, "WELDHAGEN WATER MANAGEMENT");
+
+      // Relay 1 Badge (R1)
+      int r1_x = 445;
+      int r1_y = 12;
+      int r_w = 115;
+      int r_h = 30;
+      if (id(cerbo_relays_connected)) {
+        if (id(cerbo_relay_1_closed)) {
+          it.filled_rectangle(r1_x, r1_y, r_w, r_h, status_green);
+          it.print(r1_x + r_w / 2, r1_y + 7, id(font_small), bg_color, TextAlign::TOP_CENTER, "R1 CLOSED/OK");
+        } else {
+          it.filled_rectangle(r1_x, r1_y, r_w, r_h, status_red);
+          it.print(r1_x + r_w / 2, r1_y + 7, id(font_small), text_white, TextAlign::TOP_CENTER, "R1 OPEN/ALM");
+        }
+      } else {
+        it.rectangle(r1_x, r1_y, r_w, r_h, border_color);
+        it.print(r1_x + r_w / 2, r1_y + 7, id(font_small), text_muted, TextAlign::TOP_CENTER, "R1 --");
+      }
+
+      // Relay 2 Badge (R2)
+      int r2_x = 570;
+      int r2_y = 12;
+      if (id(cerbo_relays_connected)) {
+        if (id(cerbo_relay_2_closed)) {
+          it.filled_rectangle(r2_x, r2_y, r_w, r_h, status_green);
+          it.print(r2_x + r_w / 2, r2_y + 7, id(font_small), bg_color, TextAlign::TOP_CENTER, "R2 CLOSED");
+        } else {
+          it.filled_rectangle(r2_x, r2_y, r_w, r_h, status_yellow);
+          it.print(r2_x + r_w / 2, r2_y + 7, id(font_small), bg_color, TextAlign::TOP_CENTER, "R2 BYPASS");
+        }
+      } else {
+        it.rectangle(r2_x, r2_y, r_w, r_h, border_color);
+        it.print(r2_x + r_w / 2, r2_y + 7, id(font_small), text_muted, TextAlign::TOP_CENTER, "R2 --");
+      }
+
+      // IP Address
+      it.print(705, 18, id(font_small), text_gray, "IP: ");
+      if (wifi::global_wifi_component != nullptr && !wifi::global_wifi_component->get_ip_addresses().empty()) {
+        char ip_buf[32];
+        wifi::global_wifi_component->get_ip_addresses()[0].str_to(ip_buf);
+        it.print(730, 18, id(font_small), text_cyan, ip_buf);
+      } else {
+        it.print(730, 18, id(font_small), status_red, "NO IP");
+      }
+
+      // Link / MQTT Connection
+      it.print(860, 18, id(font_small), text_gray, "LINK: ");
+      if (id(mqtt_link_ok)) {
+        it.print(905, 18, id(font_small), status_green, "CONNECTED");
+      } else {
+        it.print(905, 18, id(font_small), status_red, "DISCONNECTED");
+      }
+
+      // ================================================================
+      // 3. LEFT PANEL: 7 RESERVOIR TANK LEVELS (x: 15 to 505, y: 68 to 588)
+      // ================================================================
+      const char* tank_names[] = {
+        "Main 60kL",
+        "Feed 10kL 1",
+        "Feed 10kL 2",
+        "DKR B1",
+        "DKR B2",
+        "DKR B3",
+        "DKR B4"
+      };
+
+      const float tank_capacities[] = {
+        60000.0,
+        10000.0,
+        10000.0,
+        5000.0,
+        5000.0,
+        5000.0,
+        5000.0
+      };
+
+      int tank_y_start = 68;
+      int row_height = 70;
+      int tank_card_width = 485;
+
+      for (int i = 0; i < 7; i++) {
+        int y = tank_y_start + i * (row_height + 4);
+
+        // Row Card Background & Border
+        it.filled_rectangle(15, y, tank_card_width, row_height, card_color);
+        it.rectangle(15, y, tank_card_width, row_height, border_color);
+
+        // Tank Name
+        it.print(28, y + 12, id(font_medium), text_white, tank_names[i]);
+
+        // Draw Progress Bar (x: 28, y: y + 40, w: 230, h: 18)
+        int bar_x = 28;
+        int bar_y = y + 40;
+        int bar_w = 230;
+        int bar_h = 18;
+        it.rectangle(bar_x, bar_y, bar_w, bar_h, border_color);
+
+        if (id(cage_tank_connected)[i]) {
+          float val = id(cage_level)[i];
+          if (val < 0.0) val = 0.0;
+          if (val > 100.0) val = 100.0;
+          int fill_w = (int)((val / 100.0) * (bar_w - 4));
+
+          // Color coded: Green (>80%), Yellow (50-80%), Red (<=50%)
+          Color bar_color = status_green;
+          if (val > 80.0) {
+            bar_color = status_green;
+          } else if (val >= 50.0) {
+            bar_color = status_yellow;
+          } else {
+            // Flashing Red
+            bar_color = ((millis() / 500) % 2 == 0) ? status_red : Color(100, 0, 0);
+          }
+
+          // Fill Progress Bar
+          if (fill_w > 0) {
+            it.filled_rectangle(bar_x + 2, bar_y + 2, fill_w, bar_h - 4, bar_color);
+          }
+
+          // Percentage Text
+          char pct_txt[16];
+          sprintf(pct_txt, "%3.0f%%", val);
+          it.print(bar_x + bar_w + 12, y + 38, id(font_medium), bar_color, pct_txt);
+
+          // Liters Volume
+          float liters = 0.0;
+          if (id(cage_remaining_m3)[i] > 0.0) {
+            liters = id(cage_remaining_m3)[i] * 1000.0;
+          } else {
+            liters = (val / 100.0) * tank_capacities[i];
+          }
+          char lit_txt[20];
+          sprintf(lit_txt, "%.0f L", liters);
+          it.print(385, y + 40, id(font_small), text_gray, lit_txt);
+        } else {
+          it.print(bar_x + 10, y + 40, id(font_small), text_muted, "SENSOR OFFLINE");
+        }
+      }
+
+      // ================================================================
+      // 4. RIGHT SECTION (x: 515 to 1010)
+      // ================================================================
+      int right_x = 515;
+      int right_w = 494;
+
+      // ----------------------------------------------------------------
+      // SECTION 4A: 4 DKR BYPASS CONTROLS (y: 68 to 223)
+      // ----------------------------------------------------------------
+      int bp_card_y = 68;
+      int bp_card_h = 155;
+      it.filled_rectangle(right_x, bp_card_y, right_w, bp_card_h, card_color);
+      it.rectangle(right_x, bp_card_y, right_w, bp_card_h, border_color);
+
+      // Section Header
+      it.print(right_x + 15, bp_card_y + 10, id(font_medium), text_cyan, "DKR BYPASS STATUS");
+
+      const char* bp_names[] = { "B1 (DKR 1)", "B2 (DKR 2)", "B3 (DKR 3)", "B4 (DKR 4)" };
+      int sub_w = 226;
+      int sub_h = 46;
+
+      for (int i = 0; i < 4; i++) {
+        int col = i % 2;
+        int row = i / 2;
+        int bx = right_x + 12 + col * (sub_w + 16);
+        int by = bp_card_y + 42 + row * (sub_h + 10);
+
+        it.filled_rectangle(bx, by, sub_w, sub_h, bg_color);
+        it.rectangle(bx, by, sub_w, sub_h, border_color);
+
+        it.print(bx + 12, by + 13, id(font_small), text_white, bp_names[i]);
+
+        int badge_x = bx + 130;
+        int badge_y = by + 9;
+        int badge_w = 84;
+        int badge_h = 28;
+
+        if (id(cage_wire_fault)[i]) {
+          it.filled_rectangle(badge_x, badge_y, badge_w, badge_h, status_orange);
+          it.print(badge_x + badge_w / 2, badge_y + 6, id(font_tiny), text_white, TextAlign::TOP_CENTER, "FAULT");
+        } else if (id(cage_maintenance_mode)[i]) {
+          it.filled_rectangle(badge_x, badge_y, badge_w, badge_h, status_yellow);
+          it.print(badge_x + badge_w / 2, badge_y + 6, id(font_tiny), bg_color, TextAlign::TOP_CENTER, "MAINT BP");
+        } else if (id(cage_bypass_connected)[i]) {
+          bool is_on = (id(cage_bypass_level)[i] >= 50.0f);
+          if (is_on) {
+            it.filled_rectangle(badge_x, badge_y, badge_w, badge_h, status_yellow);
+            it.print(badge_x + badge_w / 2, badge_y + 6, id(font_small), bg_color, TextAlign::TOP_CENTER, "ON");
+          } else {
+            it.filled_rectangle(badge_x, badge_y, badge_w, badge_h, status_green);
+            it.print(badge_x + badge_w / 2, badge_y + 6, id(font_small), bg_color, TextAlign::TOP_CENTER, "OFF");
+          }
+        } else {
+          it.rectangle(badge_x, badge_y, badge_w, badge_h, border_color);
+          it.print(badge_x + badge_w / 2, badge_y + 6, id(font_small), text_muted, TextAlign::TOP_CENTER, "--");
+        }
+      }
+
+      // ----------------------------------------------------------------
+      // SECTION 4B: 4 PIPE ALARMS (y: 233 to 388)
+      // ----------------------------------------------------------------
+      int p_card_y = 233;
+      int p_card_h = 155;
+      it.filled_rectangle(right_x, p_card_y, right_w, p_card_h, card_color);
+      it.rectangle(right_x, p_card_y, right_w, p_card_h, border_color);
+
+      // Section Header
+      it.print(right_x + 15, p_card_y + 10, id(font_medium), text_cyan, "PIPE ALARMS / MONITORS");
+
+      const char* pipe_names[] = { "Pipe 1 (P1)", "Pipe 2 (P2)", "Pipe 3 (P3)", "Pipe 4 (P4)" };
+
+      for (int i = 0; i < 4; i++) {
+        int col = i % 2;
+        int row = i / 2;
+        int px = right_x + 12 + col * (sub_w + 16);
+        int py = p_card_y + 42 + row * (sub_h + 10);
+
+        it.filled_rectangle(px, py, sub_w, sub_h, bg_color);
+        it.rectangle(px, py, sub_w, sub_h, border_color);
+
+        it.print(px + 12, py + 13, id(font_small), text_white, pipe_names[i]);
+
+        int badge_x = px + 130;
+        int badge_y = py + 9;
+        int badge_w = 84;
+        int badge_h = 28;
+
+        if (!id(cage_di_connected)[i]) {
+          it.rectangle(badge_x, badge_y, badge_w, badge_h, border_color);
+          it.print(badge_x + badge_w / 2, badge_y + 6, id(font_small), text_muted, TextAlign::TOP_CENTER, "OFFLINE");
+        } else if (id(cage_alarm)[i]) {
+          it.filled_rectangle(badge_x, badge_y, badge_w, badge_h, status_red);
+          it.print(badge_x + badge_w / 2, badge_y + 6, id(font_small), text_white, TextAlign::TOP_CENTER, "ALARM");
+        } else {
+          it.filled_rectangle(badge_x, badge_y, badge_w, badge_h, status_green);
+          it.print(badge_x + badge_w / 2, badge_y + 6, id(font_small), bg_color, TextAlign::TOP_CENTER, "OK");
+        }
+      }
+
+      // ----------------------------------------------------------------
+      // SECTION 4C: DIGITAL INPUTS (GREEN FOR ON, RED FOR OFF) (y: 398 to 588)
+      // ----------------------------------------------------------------
+      int di_card_y = 398;
+      int di_card_h = 190;
+      it.filled_rectangle(right_x, di_card_y, right_w, di_card_h, card_color);
+      it.rectangle(right_x, di_card_y, right_w, di_card_h, border_color);
+
+      // Section Header
+      it.print(right_x + 15, di_card_y + 10, id(font_medium), text_white, "DIGITAL INPUTS");
+      it.print(right_x + 280, di_card_y + 13, id(font_tiny), text_gray, "GREEN = ON  |  RED = OFF");
+
+      const char* di_labels[] = { "INPUT 1", "INPUT 2", "INPUT 3", "INPUT 4" };
+      int di_sub_h = 56;
+
+      for (int i = 0; i < 4; i++) {
+        int col = i % 2;
+        int row = i / 2;
+        int dx = right_x + 12 + col * (sub_w + 16);
+        int dy = di_card_y + 40 + row * (di_sub_h + 12);
+
+        it.filled_rectangle(dx, dy, sub_w, di_sub_h, bg_color);
+        it.rectangle(dx, dy, sub_w, di_sub_h, border_color);
+
+        // Input Label
+        it.print(dx + 15, dy + 18, id(font_medium), text_white, di_labels[i]);
+
+        int badge_x = dx + 115;
+        int badge_y = dy + 10;
+        int badge_w = 98;
+        int badge_h = 36;
+
+        if (!id(cage_di_connected)[i]) {
+          it.rectangle(badge_x, badge_y, badge_w, badge_h, border_color);
+          it.print(badge_x + badge_w / 2, badge_y + 10, id(font_small), text_muted, TextAlign::TOP_CENTER, "OFFLINE");
+        } else if (id(cage_di_state)[i]) {
+          // SOLID GREEN FOR ON STATE
+          it.filled_rectangle(badge_x, badge_y, badge_w, badge_h, status_green);
+          it.print(badge_x + badge_w / 2, badge_y + 7, id(font_large), bg_color, TextAlign::TOP_CENTER, "ON");
+        } else {
+          // SOLID RED FOR OFF STATE
+          it.filled_rectangle(badge_x, badge_y, badge_w, badge_h, status_red);
+          it.print(badge_x + badge_w / 2, badge_y + 7, id(font_large), text_white, TextAlign::TOP_CENTER, "OFF");
+        }
+      }
