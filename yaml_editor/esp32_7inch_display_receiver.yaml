@@ -1,8 +1,8 @@
 # -------------------------------------------------------------
 # 7-INCH ESP32-P4 MASTER ALARM RECEIVER DISPLAY
 # Target Chip: ESP32-P4 (1024x600 MIPI-DSI Display + ESP32-C6 Wi-Fi)
-# Comms: Dual ESP-NOW Direct MAC Receiver + UDP Port 4444 Broadcast
-# Visual Display: 18 Digital Input Zones (Solid GREEN for ON, Solid RED for OFF)
+# Comms: Fast UDP Port 4444 Broadcast + Heartbeat Timeout Watchdog
+# Visual Display: 18 Digital Input Zones (Solid GREEN for ON, Solid RED for OFF, OFFLINE Warning on Loss of Comms)
 # -------------------------------------------------------------
 substitutions:
   device_name: esp32-7inch-p4-display
@@ -57,7 +57,7 @@ light:
 logger:
   level: INFO
 
-# Enable ESP32-C6 Hosted co-processor for Wi-Fi & ESP-NOW
+# Enable ESP32-C6 Hosted co-processor for Wi-Fi
 esp32_hosted:
   variant: ESP32C6
   reset_pin: GPIO54
@@ -69,17 +69,13 @@ esp32_hosted:
   d3_pin: GPIO17
   active_high: true
 
-# Wireless Wi-Fi Configuration with Fast Static IP
+# Wireless Wi-Fi Configuration
 wifi:
   ssid: "H824"
   password: "gw202001"
-  manual_ip:
-    static_ip: 192.168.3.30
-    gateway: 192.168.3.1
-    subnet: 255.255.255.0
   fast_connect: true
 
-# Fast ESP-NOW & UDP Polling Loop (50 Hz)
+# Fast UDP Polling Loop (50 Hz)
 interval:
   - interval: 20ms
     then:
@@ -218,6 +214,10 @@ color:
     red: 1.0
     green: 0.82
     blue: 0.0
+  - id: c_amber
+    red: 1.0
+    green: 0.55
+    blue: 0.0
   - id: c_cyan
     red: 0.0
     green: 0.82
@@ -259,6 +259,10 @@ display:
       Color status_green = id(c_green);
       Color status_red = id(c_red);
       Color status_yellow = id(c_yellow);
+      Color status_amber = id(c_amber);
+
+      uint32_t now = millis();
+      bool is_online = (global_p4_receiver != nullptr && global_p4_receiver->comms_online && global_p4_receiver->last_packet_time > 0 && (now - global_p4_receiver->last_packet_time) < 6000);
 
       // 1. CLEAR SCREEN / BACKGROUND
       it.fill(bg_color);
@@ -267,47 +271,34 @@ display:
       // 2. TOP HEADER BAR (60px High)
       // -------------------------------------------------------------
       it.filled_rectangle(0, 0, 1024, 60, header_color);
-      it.line(0, 60, 1024, 60, text_cyan);
+      it.line(0, 60, 1024, 60, is_online ? text_cyan : status_red);
 
       // Header Title
       it.print(18, 18, id(font_header), text_white, "18-ZONE ALARM MONITOR & RECEIVER");
 
-      // Count active zones
+      // Count active zones (only valid if online)
       int active_count = 0;
-      for (int i = 0; i < 18; i++) {
-        bool active = false;
-        if (global_p4_receiver != nullptr) {
-          active = global_p4_receiver->di_states[i];
+      if (is_online) {
+        for (int i = 0; i < 18; i++) {
+          if (global_p4_receiver != nullptr && global_p4_receiver->di_states[i]) {
+            active_count++;
+          }
         }
-        if (!active) {
-          if (i == 0) active = id(di_01_gw).state;
-          else if (i == 1) active = id(di_02_gw).state;
-          else if (i == 2) active = id(di_03_gw).state;
-          else if (i == 3) active = id(di_04_gw).state;
-          else if (i == 4) active = id(di_05_gw).state;
-          else if (i == 5) active = id(di_06_gw).state;
-          else if (i == 6) active = id(di_07_gw).state;
-          else if (i == 7) active = id(di_08_gw).state;
-          else if (i == 8) active = id(di_09_gw).state;
-          else if (i == 9) active = id(di_10_gw).state;
-          else if (i == 10) active = id(di_11_gw).state;
-          else if (i == 11) active = id(di_12_gw).state;
-          else if (i == 12) active = id(di_13_gw).state;
-          else if (i == 13) active = id(di_14_gw).state;
-          else if (i == 14) active = id(di_15_gw).state;
-          else if (i == 15) active = id(di_16_gw).state;
-          else if (i == 16) active = id(di_17_gw).state;
-          else if (i == 17) active = id(di_18_gw).state;
-        }
-        if (active) active_count++;
       }
 
       // Summary Status Badge in Header
-      int status_badge_x = 440;
+      int status_badge_x = 420;
       int status_badge_y = 12;
-      int status_badge_w = 230;
+      int status_badge_w = 260;
       int status_badge_h = 36;
-      if (active_count > 0) {
+
+      if (!is_online) {
+        // Blinking / High-Visibility Comms Lost Banner
+        bool blink = ((now / 500) % 2 == 0);
+        it.filled_rectangle(status_badge_x, status_badge_y, status_badge_w, status_badge_h, blink ? status_red : card_color);
+        it.rectangle(status_badge_x, status_badge_y, status_badge_w, status_badge_h, status_red);
+        it.print(status_badge_x + status_badge_w / 2, status_badge_y + 8, id(font_medium), blink ? text_white : status_red, TextAlign::TOP_CENTER, "COMMS LOST / OFFLINE");
+      } else if (active_count > 0) {
         it.filled_rectangle(status_badge_x, status_badge_y, status_badge_w, status_badge_h, status_green);
         char act_txt[32];
         sprintf(act_txt, "ACTIVE: %d / 18 ON", active_count);
@@ -318,29 +309,25 @@ display:
         it.print(status_badge_x + status_badge_w / 2, status_badge_y + 8, id(font_medium), status_red, TextAlign::TOP_CENTER, "ALL 18 ZONES OFF");
       }
 
-      // Wi-Fi RSSI / ESP-NOW Status
+      // Wi-Fi RSSI
       if (id(wifi_signal_dbm).has_state()) {
         char rssi_buf[32];
         sprintf(rssi_buf, "RSSI: %.0f dBm", id(wifi_signal_dbm).state);
-        it.print(685, 20, id(font_small), text_gray, rssi_buf);
-      } else {
-        it.print(685, 20, id(font_small), text_gray, "ESP-NOW ONLY");
+        it.print(700, 20, id(font_small), text_gray, rssi_buf);
       }
 
       // IP Address
-      it.print(810, 20, id(font_small), text_gray, "IP: ");
+      it.print(820, 20, id(font_small), text_gray, "IP: ");
       if (wifi::global_wifi_component != nullptr && !wifi::global_wifi_component->get_ip_addresses().empty()) {
         char ip_buf[32];
         wifi::global_wifi_component->get_ip_addresses()[0].str_to(ip_buf);
-        it.print(835, 20, id(font_small), text_cyan, ip_buf);
+        it.print(845, 20, id(font_small), text_cyan, ip_buf);
       } else {
-        it.print(835, 20, id(font_small), status_yellow, "192.168.3.30");
+        it.print(845, 20, id(font_small), status_red, "NO IP");
       }
 
-      // Stream / Link Status Dot (Green if ESP-NOW or UDP packet received within 5s)
-      uint32_t now = millis();
-      bool stream_alive = (global_p4_receiver != nullptr && global_p4_receiver->last_packet_time > 0 && (now - global_p4_receiver->last_packet_time) < 6000);
-      it.filled_circle(995, 28, 6, stream_alive ? status_green : status_red);
+      // Stream / Link Status Indicator
+      it.filled_circle(995, 28, 6, is_online ? status_green : status_red);
 
       // -------------------------------------------------------------
       // 3. 18-ZONE ALARM MATRIX (6 Columns x 3 Rows)
@@ -366,7 +353,7 @@ display:
 
         // Card Container Background & Border
         it.filled_rectangle(x, y, card_w, card_h, card_color);
-        it.rectangle(x, y, card_w, card_h, border_color);
+        it.rectangle(x, y, card_w, card_h, is_online ? border_color : status_red);
 
         // Zone Header
         char zone_lbl[16];
@@ -374,46 +361,30 @@ display:
         it.print(x + 12, y + 10, id(font_medium), text_white, zone_lbl);
         it.print(x + card_w - 12, y + 14, id(font_tiny), text_gray, TextAlign::TOP_RIGHT, pin_names[i]);
 
-        // State Check
-        bool is_active = false;
-        if (global_p4_receiver != nullptr) {
-          is_active = global_p4_receiver->di_states[i];
-        }
-        if (!is_active) {
-          if (i == 0) is_active = id(di_01_gw).state;
-          else if (i == 1) is_active = id(di_02_gw).state;
-          else if (i == 2) is_active = id(di_03_gw).state;
-          else if (i == 3) is_active = id(di_04_gw).state;
-          else if (i == 4) is_active = id(di_05_gw).state;
-          else if (i == 5) is_active = id(di_06_gw).state;
-          else if (i == 6) is_active = id(di_07_gw).state;
-          else if (i == 7) is_active = id(di_08_gw).state;
-          else if (i == 8) is_active = id(di_09_gw).state;
-          else if (i == 9) is_active = id(di_10_gw).state;
-          else if (i == 10) is_active = id(di_11_gw).state;
-          else if (i == 11) is_active = id(di_12_gw).state;
-          else if (i == 12) is_active = id(di_13_gw).state;
-          else if (i == 13) is_active = id(di_14_gw).state;
-          else if (i == 14) is_active = id(di_15_gw).state;
-          else if (i == 15) is_active = id(di_16_gw).state;
-          else if (i == 16) is_active = id(di_17_gw).state;
-          else if (i == 17) is_active = id(di_18_gw).state;
-        }
-
-        // Indicator Box (138px x 105px)
+        // Indicator Box (138px x 106px)
         int box_x = x + 10;
         int box_y = y + 42;
         int box_w = card_w - 20;
         int box_h = 106;
 
-        // SOLID GREEN FOR ON, SOLID RED FOR OFF
-        if (is_active) {
-          it.filled_rectangle(box_x, box_y, box_w, box_h, status_green);
-          it.print(box_x + box_w / 2, box_y + 26, id(font_large), bg_color, TextAlign::TOP_CENTER, "ON");
-          it.print(box_x + box_w / 2, box_y + 68, id(font_small), bg_color, TextAlign::TOP_CENTER, "ACTIVE");
+        if (!is_online) {
+          // COMMS LOST / OFFLINE STATE
+          it.filled_rectangle(box_x, box_y, box_w, box_h, bg_color);
+          it.rectangle(box_x, box_y, box_w, box_h, status_red);
+          it.print(box_x + box_w / 2, box_y + 24, id(font_large), text_muted, TextAlign::TOP_CENTER, "OFFLINE");
+          it.print(box_x + box_w / 2, box_y + 68, id(font_small), status_amber, TextAlign::TOP_CENTER, "NO LINK");
         } else {
-          it.filled_rectangle(box_x, box_y, box_w, box_h, status_red);
-          it.print(box_x + box_w / 2, box_y + 26, id(font_large), text_white, TextAlign::TOP_CENTER, "OFF");
-          it.print(box_x + box_w / 2, box_y + 68, id(font_small), text_white, TextAlign::TOP_CENTER, "IDLE");
+          bool is_active = (global_p4_receiver != nullptr && global_p4_receiver->di_states[i]);
+
+          // SOLID GREEN FOR ON, SOLID RED FOR OFF
+          if (is_active) {
+            it.filled_rectangle(box_x, box_y, box_w, box_h, status_green);
+            it.print(box_x + box_w / 2, box_y + 26, id(font_large), bg_color, TextAlign::TOP_CENTER, "ON");
+            it.print(box_x + box_w / 2, box_y + 68, id(font_small), bg_color, TextAlign::TOP_CENTER, "ACTIVE");
+          } else {
+            it.filled_rectangle(box_x, box_y, box_w, box_h, status_red);
+            it.print(box_x + box_w / 2, box_y + 26, id(font_large), text_white, TextAlign::TOP_CENTER, "OFF");
+            it.print(box_x + box_w / 2, box_y + 68, id(font_small), text_white, TextAlign::TOP_CENTER, "IDLE");
+          }
         }
       }
