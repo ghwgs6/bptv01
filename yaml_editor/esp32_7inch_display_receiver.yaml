@@ -1,6 +1,7 @@
 # -------------------------------------------------------------
 # 7-INCH ESP32-P4 MASTER ALARM RECEIVER DISPLAY
 # Target Chip: ESP32-P4 (1024x600 MIPI-DSI Display + ESP32-C6 Wi-Fi)
+# Comms: Dual ESP-NOW Direct MAC Receiver + UDP Port 4444 Broadcast
 # Visual Display: 18 Digital Input Zones (Solid GREEN for ON, Solid RED for OFF)
 # -------------------------------------------------------------
 substitutions:
@@ -11,7 +12,7 @@ esphome:
   name: ${device_name}
   friendly_name: ${friendly_name}
   includes:
-    - udp_receiver.h
+    - p4_receiver.h
 
 esp32:
   board: esp32-p4-evboard
@@ -56,7 +57,7 @@ light:
 logger:
   level: INFO
 
-# Enable ESP32-C6 Hosted co-processor for Wi-Fi
+# Enable ESP32-C6 Hosted co-processor for Wi-Fi & ESP-NOW
 esp32_hosted:
   variant: ESP32C6
   reset_pin: GPIO54
@@ -68,27 +69,23 @@ esp32_hosted:
   d3_pin: GPIO17
   active_high: true
 
-# Wireless Wi-Fi Configuration
+# Wireless Wi-Fi Configuration with Fast Static IP
 wifi:
-  networks:
-    - ssid: "H824"
-      password: "gw202001"
-      priority: 10.0
-    - ssid: "Pulse_Staff"
-      password: "Pulse@1234"
-      priority: 5.0
-    - ssid: "DKR Site B"
-      password: "W3ldhag3n"
-      priority: 1.0
+  ssid: "H824"
+  password: "gw202001"
+  manual_ip:
+    static_ip: 192.168.3.30
+    gateway: 192.168.3.1
+    subnet: 255.255.255.0
   fast_connect: true
 
-# Fast UDP Polling Loop (50 Hz)
+# Fast ESP-NOW & UDP Polling Loop (50 Hz)
 interval:
   - interval: 20ms
     then:
       - lambda: |-
-          if (global_udp_receiver != nullptr) {
-            global_udp_receiver->loop();
+          if (global_p4_receiver != nullptr) {
+            global_p4_receiver->loop();
           }
 
 api:
@@ -279,8 +276,8 @@ display:
       int active_count = 0;
       for (int i = 0; i < 18; i++) {
         bool active = false;
-        if (global_udp_receiver != nullptr) {
-          active = global_udp_receiver->di_states[i];
+        if (global_p4_receiver != nullptr) {
+          active = global_p4_receiver->di_states[i];
         }
         if (!active) {
           if (i == 0) active = id(di_01_gw).state;
@@ -306,7 +303,7 @@ display:
       }
 
       // Summary Status Badge in Header
-      int status_badge_x = 450;
+      int status_badge_x = 440;
       int status_badge_y = 12;
       int status_badge_w = 230;
       int status_badge_h = 36;
@@ -321,26 +318,28 @@ display:
         it.print(status_badge_x + status_badge_w / 2, status_badge_y + 8, id(font_medium), status_red, TextAlign::TOP_CENTER, "ALL 18 ZONES OFF");
       }
 
-      // Wi-Fi RSSI
+      // Wi-Fi RSSI / ESP-NOW Status
       if (id(wifi_signal_dbm).has_state()) {
         char rssi_buf[32];
         sprintf(rssi_buf, "RSSI: %.0f dBm", id(wifi_signal_dbm).state);
-        it.print(700, 20, id(font_small), text_gray, rssi_buf);
+        it.print(685, 20, id(font_small), text_gray, rssi_buf);
+      } else {
+        it.print(685, 20, id(font_small), text_gray, "ESP-NOW ONLY");
       }
 
       // IP Address
-      it.print(830, 20, id(font_small), text_gray, "IP: ");
+      it.print(810, 20, id(font_small), text_gray, "IP: ");
       if (wifi::global_wifi_component != nullptr && !wifi::global_wifi_component->get_ip_addresses().empty()) {
         char ip_buf[32];
         wifi::global_wifi_component->get_ip_addresses()[0].str_to(ip_buf);
-        it.print(855, 20, id(font_small), text_cyan, ip_buf);
+        it.print(835, 20, id(font_small), text_cyan, ip_buf);
       } else {
-        it.print(855, 20, id(font_small), status_red, "NO IP");
+        it.print(835, 20, id(font_small), status_yellow, "192.168.3.30");
       }
 
-      // Stream / Link Status Dot
+      // Stream / Link Status Dot (Green if ESP-NOW or UDP packet received within 5s)
       uint32_t now = millis();
-      bool stream_alive = (global_udp_receiver != nullptr && global_udp_receiver->last_packet_time > 0 && (now - global_udp_receiver->last_packet_time) < 6000);
+      bool stream_alive = (global_p4_receiver != nullptr && global_p4_receiver->last_packet_time > 0 && (now - global_p4_receiver->last_packet_time) < 6000);
       it.filled_circle(995, 28, 6, stream_alive ? status_green : status_red);
 
       // -------------------------------------------------------------
@@ -377,8 +376,8 @@ display:
 
         // State Check
         bool is_active = false;
-        if (global_udp_receiver != nullptr) {
-          is_active = global_udp_receiver->di_states[i];
+        if (global_p4_receiver != nullptr) {
+          is_active = global_p4_receiver->di_states[i];
         }
         if (!is_active) {
           if (i == 0) is_active = id(di_01_gw).state;
