@@ -167,6 +167,10 @@ globals:
     type: int
     restore_value: no
     initial_value: '0'
+  - id: last_touch_time
+    type: uint32_t
+    restore_value: no
+    initial_value: '0'
 
 # -------------------------------------------------------------
 # CONTINUOUS 2-SECOND HEARTBEAT SYNC ENGINE (Paced for 100% Delivery)
@@ -326,7 +330,7 @@ display:
     color_depth: 8bit
     color_order: bgr
     id: my_display
-    update_interval: 1s
+    update_interval: 500ms
     lambda: |-
       Color bg_color = id(c_bg);
       Color header_color = id(c_header);
@@ -419,6 +423,7 @@ touchscreen:
       mode:
         input: true
         pullup: false
+    threshold: 500
     update_interval: 50ms
     calibration:
       x_min: 280
@@ -431,6 +436,11 @@ touchscreen:
       mirror_y: false
     on_touch:
       - lambda: |-
+          uint32_t now = millis();
+          if (now - id(last_touch_time) < 400) {
+            return; // 400ms Debounce prevents touch drag/release from bleeding into buttons
+          }
+
           int x = touch.x;
           int y = touch.y;
           ESP_LOGI("touch", "Touch coordinates: x=%d, y=%d", x, y);
@@ -439,6 +449,7 @@ touchscreen:
           if (y >= 2 && y <= 40) {
             // [ALL ON]
             if (x >= 230 && x <= 306) {
+              id(last_touch_time) = now;
               id(cycle_active) = false;
               id(sim_di_01) = true;
               id(sim_di_02) = true;
@@ -464,6 +475,7 @@ touchscreen:
             }
             // [ALL OFF]
             if (x >= 308 && x <= 386) {
+              id(last_touch_time) = now;
               id(cycle_active) = false;
               id(sim_di_01) = false;
               id(sim_di_02) = false;
@@ -489,6 +501,7 @@ touchscreen:
             }
             // [CYCLE]
             if (x >= 388 && x <= 478) {
+              id(last_touch_time) = now;
               id(cycle_active) = !id(cycle_active);
               id(cycle_step) = 0;
               id(my_display).update();
@@ -511,6 +524,7 @@ touchscreen:
             int by = start_y + row * (btn_h + gap_y);
 
             if (x >= bx && x <= bx + btn_w && y >= by && y <= by + btn_h) {
+              id(last_touch_time) = now;
               id(cycle_active) = false;
               if (i == 0) { id(sim_di_01) = !id(sim_di_01); send_esp_now_packet(id(sim_di_01) ? "DI_01:ON" : "DI_01:OFF"); }
               else if (i == 1) { id(sim_di_02) = !id(sim_di_02); send_esp_now_packet(id(sim_di_02) ? "DI_02:ON" : "DI_02:OFF"); }
