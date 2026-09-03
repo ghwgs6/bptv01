@@ -1,0 +1,531 @@
+# -------------------------------------------------------------
+# ESP32 3.5" TOUCHSCREEN SENSOR SIMULATOR & REMOTE TESTER
+# Target Chip: ESP32-D0WD (3.5" ST7796 480x320 + XPT2046 Touch)
+# Protocol: ESP-NOW Multi-Target Transmitter (DI 01 through DI 18)
+# Controls: Tap any zone to toggle ON/OFF, [ALL ON], [ALL OFF], [CYCLE TEST]
+# -------------------------------------------------------------
+substitutions:
+  device_name: esp32-35-simulator-remote
+  friendly_name: "ESP32 3.5\" Sensor Simulator Remote"
+
+esphome:
+  name: ${device_name}
+  friendly_name: ${friendly_name}
+  includes:
+    - esp_now_sender.h
+  on_boot:
+    priority: 300.0
+    then:
+      - lambda: |-
+          if (global_esp_now_sender == nullptr) {
+            global_esp_now_sender = new ESPNowSenderComponent();
+            global_esp_now_sender->setup();
+          }
+
+esp32:
+  board: esp32dev
+  framework:
+    type: esp-idf
+
+# Wi-Fi configuration (multi-network with fallback AP)
+wifi:
+  networks:
+    - ssid: "H824"
+      password: "gw202001"
+      priority: 10.0
+    - ssid: "Pulse_Staff"
+      password: "Pulse@1234"
+      priority: 5.0
+  fast_connect: true
+  on_connect:
+    then:
+      - lambda: |-
+          if (global_esp_now_sender == nullptr) {
+            global_esp_now_sender = new ESPNowSenderComponent();
+            global_esp_now_sender->setup();
+          }
+  ap:
+    ssid: "ESP32-Remote-Fallback"
+    password: "fallbackpassword"
+
+api:
+ota:
+  - platform: esphome
+
+logger:
+  level: INFO
+
+# Backlight Control (GPIO27 PWM @ 20kHz)
+output:
+  - platform: ledc
+    pin: GPIO27
+    id: gpio_backlight_pwm
+    frequency: 20kHz
+    zero_means_zero: true
+
+light:
+  - platform: monochromatic
+    output: gpio_backlight_pwm
+    name: "Display Backlight"
+    id: disp_backlight
+    restore_mode: ALWAYS_ON
+
+# -------------------------------------------------------------
+# SPI BUS (Shared between ST7796 Display and XPT2046 Touch)
+# -------------------------------------------------------------
+spi:
+  - id: tft_spi
+    clk_pin: GPIO14
+    mosi_pin: GPIO13
+    miso_pin: GPIO12
+
+# -------------------------------------------------------------
+# 18 SIMULATED DIGITAL INPUT GLOBALS
+# -------------------------------------------------------------
+globals:
+  - id: sim_di_01
+    type: bool
+    restore_value: no
+    initial_value: 'false'
+  - id: sim_di_02
+    type: bool
+    restore_value: no
+    initial_value: 'false'
+  - id: sim_di_03
+    type: bool
+    restore_value: no
+    initial_value: 'false'
+  - id: sim_di_04
+    type: bool
+    restore_value: no
+    initial_value: 'false'
+  - id: sim_di_05
+    type: bool
+    restore_value: no
+    initial_value: 'false'
+  - id: sim_di_06
+    type: bool
+    restore_value: no
+    initial_value: 'false'
+  - id: sim_di_07
+    type: bool
+    restore_value: no
+    initial_value: 'false'
+  - id: sim_di_08
+    type: bool
+    restore_value: no
+    initial_value: 'false'
+  - id: sim_di_09
+    type: bool
+    restore_value: no
+    initial_value: 'false'
+  - id: sim_di_10
+    type: bool
+    restore_value: no
+    initial_value: 'false'
+  - id: sim_di_11
+    type: bool
+    restore_value: no
+    initial_value: 'false'
+  - id: sim_di_12
+    type: bool
+    restore_value: no
+    initial_value: 'false'
+  - id: sim_di_13
+    type: bool
+    restore_value: no
+    initial_value: 'false'
+  - id: sim_di_14
+    type: bool
+    restore_value: no
+    initial_value: 'false'
+  - id: sim_di_15
+    type: bool
+    restore_value: no
+    initial_value: 'false'
+  - id: sim_di_16
+    type: bool
+    restore_value: no
+    initial_value: 'false'
+  - id: sim_di_17
+    type: bool
+    restore_value: no
+    initial_value: 'false'
+  - id: sim_di_18
+    type: bool
+    restore_value: no
+    initial_value: 'false'
+  - id: cycle_active
+    type: bool
+    restore_value: no
+    initial_value: 'false'
+  - id: cycle_step
+    type: int
+    restore_value: no
+    initial_value: '0'
+
+# -------------------------------------------------------------
+# CONTINUOUS 2-SECOND HEARTBEAT SYNC ENGINE
+# -------------------------------------------------------------
+interval:
+  - interval: 2s
+    then:
+      - lambda: |-
+          send_esp_now_packet(id(sim_di_01) ? "DI_01:ON" : "DI_01:OFF");
+          send_esp_now_packet(id(sim_di_02) ? "DI_02:ON" : "DI_02:OFF");
+          send_esp_now_packet(id(sim_di_03) ? "DI_03:ON" : "DI_03:OFF");
+          send_esp_now_packet(id(sim_di_04) ? "DI_04:ON" : "DI_04:OFF");
+          send_esp_now_packet(id(sim_di_05) ? "DI_05:ON" : "DI_05:OFF");
+          send_esp_now_packet(id(sim_di_06) ? "DI_06:ON" : "DI_06:OFF");
+          send_esp_now_packet(id(sim_di_07) ? "DI_07:ON" : "DI_07:OFF");
+          send_esp_now_packet(id(sim_di_08) ? "DI_08:ON" : "DI_08:OFF");
+          send_esp_now_packet(id(sim_di_09) ? "DI_09:ON" : "DI_09:OFF");
+          send_esp_now_packet(id(sim_di_10) ? "DI_10:ON" : "DI_10:OFF");
+          send_esp_now_packet(id(sim_di_11) ? "DI_11:ON" : "DI_11:OFF");
+          send_esp_now_packet(id(sim_di_12) ? "DI_12:ON" : "DI_12:OFF");
+          send_esp_now_packet(id(sim_di_13) ? "DI_13:ON" : "DI_13:OFF");
+          send_esp_now_packet(id(sim_di_14) ? "DI_14:ON" : "DI_14:OFF");
+          send_esp_now_packet(id(sim_di_15) ? "DI_15:ON" : "DI_15:OFF");
+          send_esp_now_packet(id(sim_di_16) ? "DI_16:ON" : "DI_16:OFF");
+          send_esp_now_packet(id(sim_di_17) ? "DI_17:ON" : "DI_17:OFF");
+          send_esp_now_packet(id(sim_di_18) ? "DI_18:ON" : "DI_18:OFF");
+
+  # Auto Sequential Cycle Tester (1.5s step)
+  - interval: 1500ms
+    then:
+      - lambda: |-
+          if (id(cycle_active)) {
+            int step = id(cycle_step);
+            int prev = (step + 17) % 18;
+
+            char prev_buf[16];
+            sprintf(prev_buf, "DI_%02d:OFF", prev + 1);
+            send_esp_now_packet(prev_buf);
+
+            char cur_buf[16];
+            sprintf(cur_buf, "DI_%02d:ON", step + 1);
+            send_esp_now_packet(cur_buf);
+
+            if (prev == 0) id(sim_di_01) = false;
+            else if (prev == 1) id(sim_di_02) = false;
+            else if (prev == 2) id(sim_di_03) = false;
+            else if (prev == 3) id(sim_di_04) = false;
+            else if (prev == 4) id(sim_di_05) = false;
+            else if (prev == 5) id(sim_di_06) = false;
+            else if (prev == 6) id(sim_di_07) = false;
+            else if (prev == 7) id(sim_di_08) = false;
+            else if (prev == 8) id(sim_di_09) = false;
+            else if (prev == 9) id(sim_di_10) = false;
+            else if (prev == 10) id(sim_di_11) = false;
+            else if (prev == 11) id(sim_di_12) = false;
+            else if (prev == 12) id(sim_di_13) = false;
+            else if (prev == 13) id(sim_di_14) = false;
+            else if (prev == 14) id(sim_di_15) = false;
+            else if (prev == 15) id(sim_di_16) = false;
+            else if (prev == 16) id(sim_di_17) = false;
+            else if (prev == 17) id(sim_di_18) = false;
+
+            if (step == 0) id(sim_di_01) = true;
+            else if (step == 1) id(sim_di_02) = true;
+            else if (step == 2) id(sim_di_03) = true;
+            else if (step == 3) id(sim_di_04) = true;
+            else if (step == 4) id(sim_di_05) = true;
+            else if (step == 5) id(sim_di_06) = true;
+            else if (step == 6) id(sim_di_07) = true;
+            else if (step == 7) id(sim_di_08) = true;
+            else if (step == 8) id(sim_di_09) = true;
+            else if (step == 9) id(sim_di_10) = true;
+            else if (step == 10) id(sim_di_11) = true;
+            else if (step == 11) id(sim_di_12) = true;
+            else if (step == 12) id(sim_di_13) = true;
+            else if (step == 13) id(sim_di_14) = true;
+            else if (step == 14) id(sim_di_15) = true;
+            else if (step == 15) id(sim_di_16) = true;
+            else if (step == 16) id(sim_di_17) = true;
+            else if (step == 17) id(sim_di_18) = true;
+
+            id(cycle_step) = (step + 1) % 18;
+            id(my_display).update();
+          }
+
+# -------------------------------------------------------------
+# HIGH-QUALITY TYPOGRAPHY & COLOR PALETTE
+# -------------------------------------------------------------
+font:
+  - file: 'gfonts://Roboto'
+    id: font_tiny
+    size: 10
+  - file: 'gfonts://Roboto'
+    id: font_small
+    size: 13
+  - file: 'gfonts://Roboto'
+    id: font_medium
+    size: 15
+  - file: 'gfonts://Roboto'
+    id: font_header
+    size: 17
+  - file: 'gfonts://Roboto'
+    id: font_large
+    size: 22
+
+color:
+  - id: c_bg
+    red: 0.08
+    green: 0.09
+    blue: 0.12
+  - id: c_header
+    red: 0.07
+    green: 0.13
+    blue: 0.22
+  - id: c_border
+    red: 0.22
+    green: 0.25
+    blue: 0.32
+  - id: c_card_bg
+    red: 0.12
+    green: 0.14
+    blue: 0.18
+  - id: c_green
+    red: 0.0
+    green: 0.88
+    blue: 0.32
+  - id: c_red
+    red: 0.95
+    green: 0.22
+    blue: 0.22
+  - id: c_amber
+    red: 1.0
+    green: 0.60
+    blue: 0.0
+  - id: c_cyan
+    red: 0.0
+    green: 0.82
+    blue: 1.0
+  - id: c_white
+    red: 1.0
+    green: 1.0
+    blue: 1.0
+  - id: c_gray
+    red: 0.70
+    green: 0.72
+    blue: 0.75
+  - id: c_muted
+    red: 0.45
+    green: 0.48
+    blue: 0.52
+
+# -------------------------------------------------------------
+# ST7796 3.5" TFT DISPLAY ENGINE (480 x 320 LANDSCAPE)
+# -------------------------------------------------------------
+display:
+  - platform: mipi_spi
+    model: st7796
+    spi_id: tft_spi
+    cs_pin: GPIO15
+    dc_pin: GPIO2
+    rotation: 90
+    color_depth: 8bit
+    color_order: bgr
+    id: my_display
+    update_interval: 1s
+    lambda: |-
+      Color bg_color = id(c_bg);
+      Color header_color = id(c_header);
+      Color card_color = id(c_card_bg);
+      Color border_color = id(c_border);
+      Color text_white = id(c_white);
+      Color text_cyan = id(c_cyan);
+      Color text_gray = id(c_gray);
+      Color text_muted = id(c_muted);
+      Color status_green = id(c_green);
+      Color status_red = id(c_red);
+      Color status_amber = id(c_amber);
+
+      // 1. Clear Screen
+      it.fill(bg_color);
+
+      // -------------------------------------------------------------
+      // 2. Header Bar (38px High)
+      // -------------------------------------------------------------
+      it.filled_rectangle(0, 0, 480, 38, header_color);
+      it.line(0, 38, 480, 38, text_cyan);
+
+      it.print(10, 10, id(font_header), text_white, "18-DI REMOTE TESTER");
+
+      // [ALL ON] Header Button
+      it.filled_rectangle(232, 4, 72, 30, status_green);
+      it.print(268, 11, id(font_small), bg_color, TextAlign::TOP_CENTER, "ALL ON");
+
+      // [ALL OFF] Header Button
+      it.filled_rectangle(310, 4, 74, 30, status_red);
+      it.print(347, 11, id(font_small), text_white, TextAlign::TOP_CENTER, "ALL OFF");
+
+      // [CYCLE] Header Button
+      it.filled_rectangle(390, 4, 82, 30, id(cycle_active) ? status_amber : card_color);
+      it.rectangle(390, 4, 82, 30, status_amber);
+      it.print(431, 11, id(font_small), id(cycle_active) ? bg_color : status_amber, TextAlign::TOP_CENTER, id(cycle_active) ? "CYCLING" : "CYCLE");
+
+      // -------------------------------------------------------------
+      // 3. 18-DI Interactive Touch Grid (6 Columns x 3 Rows)
+      // -------------------------------------------------------------
+      int start_x = 8;
+      int start_y = 44;
+      int btn_w = 72;
+      int btn_h = 84;
+      int gap_x = 7;
+      int gap_y = 7;
+
+      bool di_vals[18] = {
+        id(sim_di_01), id(sim_di_02), id(sim_di_03), id(sim_di_04), id(sim_di_05), id(sim_di_06),
+        id(sim_di_07), id(sim_di_08), id(sim_di_09), id(sim_di_10), id(sim_di_11), id(sim_di_12),
+        id(sim_di_13), id(sim_di_14), id(sim_di_15), id(sim_di_16), id(sim_di_17), id(sim_di_18)
+      };
+
+      for (int i = 0; i < 18; i++) {
+        int col = i % 6;
+        int row = i / 6;
+        int bx = start_x + col * (btn_w + gap_x);
+        int by = start_y + row * (btn_h + gap_y);
+
+        bool is_on = di_vals[i];
+
+        // Button Container
+        it.filled_rectangle(bx, by, btn_w, btn_h, is_on ? status_green : card_color);
+        it.rectangle(bx, by, btn_w, btn_h, is_on ? text_white : border_color);
+
+        // DI Label
+        char lbl[16];
+        sprintf(lbl, "DI %02d", i + 1);
+        it.print(bx + btn_w / 2, by + 12, id(font_medium), is_on ? bg_color : text_white, TextAlign::TOP_CENTER, lbl);
+
+        // State Text Box
+        if (is_on) {
+          it.print(bx + btn_w / 2, by + 46, id(font_large), bg_color, TextAlign::TOP_CENTER, "ON");
+        } else {
+          it.filled_rectangle(bx + 8, by + 40, btn_w - 16, 34, status_red);
+          it.print(bx + btn_w / 2, by + 46, id(font_large), text_white, TextAlign::TOP_CENTER, "OFF");
+        }
+      }
+
+# -------------------------------------------------------------
+# XPT2046 RESISTIVE TOUCHSCREEN CONTROLLER
+# -------------------------------------------------------------
+touchscreen:
+  - platform: xpt2046
+    id: hmi_touch
+    spi_id: tft_spi
+    cs_pin: GPIO33
+    interrupt_pin: GPIO36
+    update_interval: 50ms
+    calibration:
+      x_min: 280
+      x_max: 3860
+      y_min: 340
+      y_max: 3860
+    transform:
+      swap_xy: true
+      mirror_x: true
+      mirror_y: false
+    on_touch:
+      - lambda: |-
+          int x = touch.x;
+          int y = touch.y;
+          ESP_LOGI("touch", "Touch coordinates: x=%d, y=%d", x, y);
+
+          // 1. Header Action Buttons
+          if (y >= 2 && y <= 40) {
+            // [ALL ON]
+            if (x >= 230 && x <= 306) {
+              id(cycle_active) = false;
+              id(sim_di_01) = true; send_esp_now_packet("DI_01:ON");
+              id(sim_di_02) = true; send_esp_now_packet("DI_02:ON");
+              id(sim_di_03) = true; send_esp_now_packet("DI_03:ON");
+              id(sim_di_04) = true; send_esp_now_packet("DI_04:ON");
+              id(sim_di_05) = true; send_esp_now_packet("DI_05:ON");
+              id(sim_di_06) = true; send_esp_now_packet("DI_06:ON");
+              id(sim_di_07) = true; send_esp_now_packet("DI_07:ON");
+              id(sim_di_08) = true; send_esp_now_packet("DI_08:ON");
+              id(sim_di_09) = true; send_esp_now_packet("DI_09:ON");
+              id(sim_di_10) = true; send_esp_now_packet("DI_10:ON");
+              id(sim_di_11) = true; send_esp_now_packet("DI_11:ON");
+              id(sim_di_12) = true; send_esp_now_packet("DI_12:ON");
+              id(sim_di_13) = true; send_esp_now_packet("DI_13:ON");
+              id(sim_di_14) = true; send_esp_now_packet("DI_14:ON");
+              id(sim_di_15) = true; send_esp_now_packet("DI_15:ON");
+              id(sim_di_16) = true; send_esp_now_packet("DI_16:ON");
+              id(sim_di_17) = true; send_esp_now_packet("DI_17:ON");
+              id(sim_di_18) = true; send_esp_now_packet("DI_18:ON");
+              id(my_display).update();
+              return;
+            }
+            // [ALL OFF]
+            if (x >= 308 && x <= 386) {
+              id(cycle_active) = false;
+              id(sim_di_01) = false; send_esp_now_packet("DI_01:OFF");
+              id(sim_di_02) = false; send_esp_now_packet("DI_02:OFF");
+              id(sim_di_03) = false; send_esp_now_packet("DI_03:OFF");
+              id(sim_di_04) = false; send_esp_now_packet("DI_04:OFF");
+              id(sim_di_05) = false; send_esp_now_packet("DI_05:OFF");
+              id(sim_di_06) = false; send_esp_now_packet("DI_06:OFF");
+              id(sim_di_07) = false; send_esp_now_packet("DI_07:OFF");
+              id(sim_di_08) = false; send_esp_now_packet("DI_08:OFF");
+              id(sim_di_09) = false; send_esp_now_packet("DI_09:OFF");
+              id(sim_di_10) = false; send_esp_now_packet("DI_10:OFF");
+              id(sim_di_11) = false; send_esp_now_packet("DI_11:OFF");
+              id(sim_di_12) = false; send_esp_now_packet("DI_12:OFF");
+              id(sim_di_13) = false; send_esp_now_packet("DI_13:OFF");
+              id(sim_di_14) = false; send_esp_now_packet("DI_14:OFF");
+              id(sim_di_15) = false; send_esp_now_packet("DI_15:OFF");
+              id(sim_di_16) = false; send_esp_now_packet("DI_16:OFF");
+              id(sim_di_17) = false; send_esp_now_packet("DI_17:OFF");
+              id(sim_di_18) = false; send_esp_now_packet("DI_18:OFF");
+              id(my_display).update();
+              return;
+            }
+            // [CYCLE]
+            if (x >= 388 && x <= 478) {
+              id(cycle_active) = !id(cycle_active);
+              id(cycle_step) = 0;
+              id(my_display).update();
+              return;
+            }
+          }
+
+          // 2. 18-DI Buttons Grid
+          int start_x = 8;
+          int start_y = 44;
+          int btn_w = 72;
+          int btn_h = 84;
+          int gap_x = 7;
+          int gap_y = 7;
+
+          for (int i = 0; i < 18; i++) {
+            int col = i % 6;
+            int row = i / 6;
+            int bx = start_x + col * (btn_w + gap_x);
+            int by = start_y + row * (btn_h + gap_y);
+
+            if (x >= bx && x <= bx + btn_w && y >= by && y <= by + btn_h) {
+              id(cycle_active) = false;
+              if (i == 0) { id(sim_di_01) = !id(sim_di_01); send_esp_now_packet(id(sim_di_01) ? "DI_01:ON" : "DI_01:OFF"); }
+              else if (i == 1) { id(sim_di_02) = !id(sim_di_02); send_esp_now_packet(id(sim_di_02) ? "DI_02:ON" : "DI_02:OFF"); }
+              else if (i == 2) { id(sim_di_03) = !id(sim_di_03); send_esp_now_packet(id(sim_di_03) ? "DI_03:ON" : "DI_03:OFF"); }
+              else if (i == 3) { id(sim_di_04) = !id(sim_di_04); send_esp_now_packet(id(sim_di_04) ? "DI_04:ON" : "DI_04:OFF"); }
+              else if (i == 4) { id(sim_di_05) = !id(sim_di_05); send_esp_now_packet(id(sim_di_05) ? "DI_05:ON" : "DI_05:OFF"); }
+              else if (i == 5) { id(sim_di_06) = !id(sim_di_06); send_esp_now_packet(id(sim_di_06) ? "DI_06:ON" : "DI_06:OFF"); }
+              else if (i == 6) { id(sim_di_07) = !id(sim_di_07); send_esp_now_packet(id(sim_di_07) ? "DI_07:ON" : "DI_07:OFF"); }
+              else if (i == 7) { id(sim_di_08) = !id(sim_di_08); send_esp_now_packet(id(sim_di_08) ? "DI_08:ON" : "DI_08:OFF"); }
+              else if (i == 8) { id(sim_di_09) = !id(sim_di_09); send_esp_now_packet(id(sim_di_09) ? "DI_09:ON" : "DI_09:OFF"); }
+              else if (i == 9) { id(sim_di_10) = !id(sim_di_10); send_esp_now_packet(id(sim_di_10) ? "DI_10:ON" : "DI_10:OFF"); }
+              else if (i == 10) { id(sim_di_11) = !id(sim_di_11); send_esp_now_packet(id(sim_di_11) ? "DI_11:ON" : "DI_11:OFF"); }
+              else if (i == 11) { id(sim_di_12) = !id(sim_di_12); send_esp_now_packet(id(sim_di_12) ? "DI_12:ON" : "DI_12:OFF"); }
+              else if (i == 12) { id(sim_di_13) = !id(sim_di_13); send_esp_now_packet(id(sim_di_13) ? "DI_13:ON" : "DI_13:OFF"); }
+              else if (i == 13) { id(sim_di_14) = !id(sim_di_14); send_esp_now_packet(id(sim_di_14) ? "DI_14:ON" : "DI_14:OFF"); }
+              else if (i == 14) { id(sim_di_15) = !id(sim_di_15); send_esp_now_packet(id(sim_di_15) ? "DI_15:ON" : "DI_15:OFF"); }
+              else if (i == 15) { id(sim_di_16) = !id(sim_di_16); send_esp_now_packet(id(sim_di_16) ? "DI_16:ON" : "DI_16:OFF"); }
+              else if (i == 16) { id(sim_di_17) = !id(sim_di_17); send_esp_now_packet(id(sim_di_17) ? "DI_17:ON" : "DI_17:OFF"); }
+              else if (i == 17) { id(sim_di_18) = !id(sim_di_18); send_esp_now_packet(id(sim_di_18) ? "DI_18:ON" : "DI_18:OFF"); }
+              id(my_display).update();
+              break;
+            }
+          }
