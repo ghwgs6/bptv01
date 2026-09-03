@@ -12,11 +12,23 @@ esphome:
   friendly_name: ${friendly_name}
   includes:
     - esp_now_sender.h
+  on_boot:
+    priority: 200.0
+    then:
+      - switch.turn_on: disp_backlight
+      - lambda: |-
+          if (global_esp_now_sender != nullptr) {
+            global_esp_now_sender->init();
+          }
 
 esp32:
   board: esp32dev
   framework:
     type: esp-idf
+
+# Disable safe mode to prevent display lockout on rapid resets
+safe_mode:
+  disabled: true
 
 # Wi-Fi configuration (multi-network with fallback AP)
 wifi:
@@ -30,6 +42,7 @@ wifi:
   fast_connect: true
   on_connect:
     then:
+      - switch.turn_on: disp_backlight
       - lambda: |-
           if (global_esp_now_sender != nullptr) {
             global_esp_now_sender->init();
@@ -46,19 +59,13 @@ logger:
   baud_rate: 115200
 
 # -------------------------------------------------------------
-# HARDWARE BACKLIGHT (LEDC PWM on GPIO27 @ 20kHz)
+# HARDWARE BACKLIGHT (Solid GPIO Switch on GPIO27)
 # -------------------------------------------------------------
-output:
-  - platform: ledc
+switch:
+  - platform: gpio
     pin: GPIO27
-    id: gpio_backlight_pwm
-    frequency: 20kHz
-
-light:
-  - platform: monochromatic
-    output: gpio_backlight_pwm
-    name: "Display Backlight"
     id: disp_backlight
+    name: "Display Backlight"
     restore_mode: ALWAYS_ON
 
 # -------------------------------------------------------------
