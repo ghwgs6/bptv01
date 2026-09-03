@@ -1,7 +1,7 @@
 # -------------------------------------------------------------
 # ESP32 3.5" TOUCHSCREEN SENSOR SIMULATOR & REMOTE TESTER
 # Target Chip: ESP32-D0WD (3.5" ST7796 480x320 + XPT2046 Touch)
-# Controls: Tap zone to toggle, Header Mode: [TAP: NORMAL / BYPASS], [ALL ON], [ALL OFF], [CLR BYP], [CYCLE]
+# Features: Non-blocking round-robin sync, [MODE: ALARM / BYPASS], [ALL ON], [ALL OFF], [CLR BYP], [SET BYP], [CYCLE]
 # -------------------------------------------------------------
 substitutions:
   device_name: esp32-35-simulator-remote
@@ -241,12 +241,13 @@ globals:
     initial_value: '0'
 
 # -------------------------------------------------------------
-# CONTINUOUS 2-SECOND HEARTBEAT SYNC ENGINE
+# NON-BLOCKING ROUND-ROBIN HEARTBEAT SYNC ENGINE (100ms / Zone)
 # -------------------------------------------------------------
 interval:
-  - interval: 2s
+  - interval: 100ms
     then:
       - lambda: |-
+          static int sync_zone = 0;
           bool states[18] = {
             id(sim_di_01), id(sim_di_02), id(sim_di_03), id(sim_di_04), id(sim_di_05), id(sim_di_06),
             id(sim_di_07), id(sim_di_08), id(sim_di_09), id(sim_di_10), id(sim_di_11), id(sim_di_12),
@@ -257,17 +258,20 @@ interval:
             id(sim_byp_07), id(sim_byp_08), id(sim_byp_09), id(sim_byp_10), id(sim_byp_11), id(sim_byp_12),
             id(sim_byp_13), id(sim_byp_14), id(sim_byp_15), id(sim_byp_16), id(sim_byp_17), id(sim_byp_18)
           };
+
           char buf[24];
-          for (int i = 0; i < 18; i++) {
-            // Send State
-            sprintf(buf, "DI_%02d:%s", i + 1, states[i] ? "ON" : "OFF");
+          sprintf(buf, "DI_%02d:%s", sync_zone + 1, states[sync_zone] ? "ON" : "OFF");
+          send_esp_now_packet(buf);
+
+          if (bypasses[sync_zone]) {
+            sprintf(buf, "DI_%02d:BYPASS_ON", sync_zone + 1);
             send_esp_now_packet(buf);
-            delay(6);
-            // Send Bypass Status
-            sprintf(buf, "DI_%02d:%s", i + 1, bypasses[i] ? "BYPASS_ON" : "BYPASS_OFF");
+          } else {
+            sprintf(buf, "DI_%02d:BYPASS_OFF", sync_zone + 1);
             send_esp_now_packet(buf);
-            delay(6);
           }
+
+          sync_zone = (sync_zone + 1) % 18;
 
   # Auto Sequential Cycle Tester (1.5s step)
   - interval: 1500ms
@@ -280,7 +284,6 @@ interval:
             char prev_buf[16];
             sprintf(prev_buf, "DI_%02d:OFF", prev + 1);
             send_esp_now_packet(prev_buf);
-            delay(10);
 
             char cur_buf[16];
             sprintf(cur_buf, "DI_%02d:ON", step + 1);

@@ -57,7 +57,6 @@ class ESPNowSenderComponent {
       esp_now_send(receiver_mac_broadcast, (uint8_t *) state_str, strlen(state_str));
       esp_now_send(receiver_mac_board2, (uint8_t *) state_str, strlen(state_str));
       esp_now_send(receiver_mac_display, (uint8_t *) state_str, strlen(state_str));
-      ESP_LOGI("esp_now", "Sent ESP-NOW packet: %s", state_str);
     }
   }
 
@@ -66,7 +65,6 @@ class ESPNowSenderComponent {
     for (int i = 1; i <= 18; i++) {
       sprintf(buf, "DI_%02d:%s", i, state ? "ON" : "OFF");
       send_state(buf);
-      delay(12); // 12ms pacing prevents Wi-Fi RF TX buffer overflow and socket exhaustion
     }
   }
 
