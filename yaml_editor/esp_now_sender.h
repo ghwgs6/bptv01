@@ -12,11 +12,15 @@ static uint8_t receiver_mac_broadcast[] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
 static uint8_t receiver_mac_board2[] = {0x8C, 0x94, 0xDF, 0x6D, 0x43, 0xDC};
 static uint8_t receiver_mac_display[] = {0x80, 0xF1, 0xB2, 0xD3, 0x63, 0x6D};
 
-class ESPNowSenderComponent : public esphome::Component {
+class ESPNowSenderComponent {
  public:
-  void setup() override {
+  bool is_initialized = false;
+
+  void init() {
+    if (is_initialized) return;
+
     if (esp_now_init() != ESP_OK) {
-      ESP_LOGE("esp_now", "Error initializing ESP-NOW");
+      ESP_LOGW("esp_now", "esp_now_init() not ready yet");
       return;
     }
 
@@ -41,22 +45,42 @@ class ESPNowSenderComponent : public esphome::Component {
     peerDisplay.encrypt = false;
     esp_now_add_peer(&peerDisplay);
 
+    is_initialized = true;
     ESP_LOGI("esp_now", "ESP-NOW Sender Initialized! Broadcast & Target Peers registered.");
   }
 
   void send_state(const char* state_str) {
-    // Broadcast & Unicast to peers
-    esp_now_send(receiver_mac_broadcast, (uint8_t *) state_str, strlen(state_str));
-    esp_now_send(receiver_mac_board2, (uint8_t *) state_str, strlen(state_str));
-    esp_now_send(receiver_mac_display, (uint8_t *) state_str, strlen(state_str));
-    ESP_LOGI("esp_now", "Sent ESP-NOW packet: %s", state_str);
+    if (!is_initialized) {
+      init();
+    }
+    if (is_initialized) {
+      esp_now_send(receiver_mac_broadcast, (uint8_t *) state_str, strlen(state_str));
+      esp_now_send(receiver_mac_board2, (uint8_t *) state_str, strlen(state_str));
+      esp_now_send(receiver_mac_display, (uint8_t *) state_str, strlen(state_str));
+      ESP_LOGI("esp_now", "Sent ESP-NOW packet: %s", state_str);
+    }
+  }
+
+  void send_all_zones(bool state) {
+    char buf[16];
+    for (int i = 1; i <= 18; i++) {
+      sprintf(buf, "DI_%02d:%s", i, state ? "ON" : "OFF");
+      send_state(buf);
+      delay(12); // 12ms pacing prevents Wi-Fi RF TX buffer overflow and socket exhaustion on receivers
+    }
   }
 };
 
-static ESPNowSenderComponent *global_esp_now_sender = nullptr;
+static ESPNowSenderComponent *global_esp_now_sender = new ESPNowSenderComponent();
 
 inline void send_esp_now_packet(const char* msg) {
   if (global_esp_now_sender) {
     global_esp_now_sender->send_state(msg);
+  }
+}
+
+inline void send_esp_now_all(bool state) {
+  if (global_esp_now_sender) {
+    global_esp_now_sender->send_all_zones(state);
   }
 }

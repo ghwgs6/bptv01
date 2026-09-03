@@ -5,6 +5,8 @@
 #include <lwip/sockets.h>
 #include <string.h>
 
+static int gateway_udp_socket = -1;
+
 class ESPNowReceiverComponent : public esphome::Component {
  public:
   static void OnDataRecv(const esp_now_recv_info_t *recv_info, const uint8_t *incomingData, int len) {
@@ -15,26 +17,28 @@ class ESPNowReceiverComponent : public esphome::Component {
 
     ESP_LOGI("esp_now", "Received ESP-NOW packet: %s", packet);
 
-    // Forward UDP state packet to network (Broadcast on port 4444)
-    int sock = ::socket(AF_INET, SOCK_DGRAM, IPPROTO_IP);
-    if (sock >= 0) {
-      int broadcastEnable = 1;
-      setsockopt(sock, SOL_SOCKET, SO_BROADCAST, &broadcastEnable, sizeof(broadcastEnable));
+    // Forward UDP state packet to network (Port 4444)
+    if (gateway_udp_socket < 0) {
+      gateway_udp_socket = ::socket(AF_INET, SOCK_DGRAM, IPPROTO_IP);
+      if (gateway_udp_socket >= 0) {
+        int broadcastEnable = 1;
+        setsockopt(gateway_udp_socket, SOL_SOCKET, SO_BROADCAST, &broadcastEnable, sizeof(broadcastEnable));
+      }
+    }
 
+    if (gateway_udp_socket >= 0) {
       struct sockaddr_in dest_addr;
       memset(&dest_addr, 0, sizeof(dest_addr));
       dest_addr.sin_family = AF_INET;
       dest_addr.sin_port = htons(4444);
 
-      // 1. Broadcast to entire subnet (255.255.255.255)
+      // 1. Broadcast to entire subnet
       dest_addr.sin_addr.s_addr = htonl(INADDR_BROADCAST);
-      sendto(sock, packet, strlen(packet), 0, (struct sockaddr *)&dest_addr, sizeof(dest_addr));
+      sendto(gateway_udp_socket, packet, strlen(packet), 0, (struct sockaddr *)&dest_addr, sizeof(dest_addr));
 
       // 2. Direct unicast to standard display IP (192.168.3.30)
       dest_addr.sin_addr.s_addr = inet_addr("192.168.3.30");
-      sendto(sock, packet, strlen(packet), 0, (struct sockaddr *)&dest_addr, sizeof(dest_addr));
-
-      close(sock);
+      sendto(gateway_udp_socket, packet, strlen(packet), 0, (struct sockaddr *)&dest_addr, sizeof(dest_addr));
     }
 
     // Parse packet string e.g. "DI_01:ON" or "DI_01:OFF"

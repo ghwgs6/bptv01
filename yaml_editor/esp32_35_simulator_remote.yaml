@@ -14,12 +14,14 @@ esphome:
   includes:
     - esp_now_sender.h
   on_boot:
-    priority: 300.0
+    priority: 200.0
     then:
+      - switch.turn_on: bl_pin_27
+      - switch.turn_on: bl_pin_21
+      - switch.turn_on: bl_pin_4
       - lambda: |-
-          if (global_esp_now_sender == nullptr) {
-            global_esp_now_sender = new ESPNowSenderComponent();
-            global_esp_now_sender->setup();
+          if (global_esp_now_sender != nullptr) {
+            global_esp_now_sender->init();
           }
 
 esp32:
@@ -40,9 +42,8 @@ wifi:
   on_connect:
     then:
       - lambda: |-
-          if (global_esp_now_sender == nullptr) {
-            global_esp_now_sender = new ESPNowSenderComponent();
-            global_esp_now_sender->setup();
+          if (global_esp_now_sender != nullptr) {
+            global_esp_now_sender->init();
           }
   ap:
     ssid: "ESP32-Remote-Fallback"
@@ -55,19 +56,22 @@ ota:
 logger:
   level: INFO
 
-# Backlight Control (GPIO27 PWM @ 20kHz)
-output:
-  - platform: ledc
+# Backlight Control (Supports GPIO27, GPIO21, and GPIO4 across all 3.5" hardware revisions)
+switch:
+  - platform: gpio
     pin: GPIO27
-    id: gpio_backlight_pwm
-    frequency: 20kHz
-    zero_means_zero: true
-
-light:
-  - platform: monochromatic
-    output: gpio_backlight_pwm
-    name: "Display Backlight"
-    id: disp_backlight
+    id: bl_pin_27
+    name: "Backlight Pin 27"
+    restore_mode: ALWAYS_ON
+  - platform: gpio
+    pin: GPIO21
+    id: bl_pin_21
+    name: "Backlight Pin 21"
+    restore_mode: ALWAYS_ON
+  - platform: gpio
+    pin: GPIO4
+    id: bl_pin_4
+    name: "Backlight Pin 4"
     restore_mode: ALWAYS_ON
 
 # -------------------------------------------------------------
@@ -165,30 +169,23 @@ globals:
     initial_value: '0'
 
 # -------------------------------------------------------------
-# CONTINUOUS 2-SECOND HEARTBEAT SYNC ENGINE
+# CONTINUOUS 2-SECOND HEARTBEAT SYNC ENGINE (Paced for 100% Delivery)
 # -------------------------------------------------------------
 interval:
   - interval: 2s
     then:
       - lambda: |-
-          send_esp_now_packet(id(sim_di_01) ? "DI_01:ON" : "DI_01:OFF");
-          send_esp_now_packet(id(sim_di_02) ? "DI_02:ON" : "DI_02:OFF");
-          send_esp_now_packet(id(sim_di_03) ? "DI_03:ON" : "DI_03:OFF");
-          send_esp_now_packet(id(sim_di_04) ? "DI_04:ON" : "DI_04:OFF");
-          send_esp_now_packet(id(sim_di_05) ? "DI_05:ON" : "DI_05:OFF");
-          send_esp_now_packet(id(sim_di_06) ? "DI_06:ON" : "DI_06:OFF");
-          send_esp_now_packet(id(sim_di_07) ? "DI_07:ON" : "DI_07:OFF");
-          send_esp_now_packet(id(sim_di_08) ? "DI_08:ON" : "DI_08:OFF");
-          send_esp_now_packet(id(sim_di_09) ? "DI_09:ON" : "DI_09:OFF");
-          send_esp_now_packet(id(sim_di_10) ? "DI_10:ON" : "DI_10:OFF");
-          send_esp_now_packet(id(sim_di_11) ? "DI_11:ON" : "DI_11:OFF");
-          send_esp_now_packet(id(sim_di_12) ? "DI_12:ON" : "DI_12:OFF");
-          send_esp_now_packet(id(sim_di_13) ? "DI_13:ON" : "DI_13:OFF");
-          send_esp_now_packet(id(sim_di_14) ? "DI_14:ON" : "DI_14:OFF");
-          send_esp_now_packet(id(sim_di_15) ? "DI_15:ON" : "DI_15:OFF");
-          send_esp_now_packet(id(sim_di_16) ? "DI_16:ON" : "DI_16:OFF");
-          send_esp_now_packet(id(sim_di_17) ? "DI_17:ON" : "DI_17:OFF");
-          send_esp_now_packet(id(sim_di_18) ? "DI_18:ON" : "DI_18:OFF");
+          bool states[18] = {
+            id(sim_di_01), id(sim_di_02), id(sim_di_03), id(sim_di_04), id(sim_di_05), id(sim_di_06),
+            id(sim_di_07), id(sim_di_08), id(sim_di_09), id(sim_di_10), id(sim_di_11), id(sim_di_12),
+            id(sim_di_13), id(sim_di_14), id(sim_di_15), id(sim_di_16), id(sim_di_17), id(sim_di_18)
+          };
+          char buf[16];
+          for (int i = 0; i < 18; i++) {
+            sprintf(buf, "DI_%02d:%s", i + 1, states[i] ? "ON" : "OFF");
+            send_esp_now_packet(buf);
+            delay(10); // 10ms pacing prevents buffer drops on Wi-Fi radio and receiver FIFO
+          }
 
   # Auto Sequential Cycle Tester (1.5s step)
   - interval: 1500ms
@@ -201,6 +198,7 @@ interval:
             char prev_buf[16];
             sprintf(prev_buf, "DI_%02d:OFF", prev + 1);
             send_esp_now_packet(prev_buf);
+            delay(10);
 
             char cur_buf[16];
             sprintf(cur_buf, "DI_%02d:ON", step + 1);
@@ -323,6 +321,7 @@ display:
     spi_id: tft_spi
     cs_pin: GPIO15
     dc_pin: GPIO2
+    data_rate: 40MHz
     rotation: 90
     color_depth: 8bit
     color_order: bgr
@@ -415,7 +414,11 @@ touchscreen:
     id: hmi_touch
     spi_id: tft_spi
     cs_pin: GPIO33
-    interrupt_pin: GPIO36
+    interrupt_pin:
+      number: GPIO36
+      mode:
+        input: true
+        pullup: false
     update_interval: 50ms
     calibration:
       x_min: 280
@@ -437,49 +440,51 @@ touchscreen:
             // [ALL ON]
             if (x >= 230 && x <= 306) {
               id(cycle_active) = false;
-              id(sim_di_01) = true; send_esp_now_packet("DI_01:ON");
-              id(sim_di_02) = true; send_esp_now_packet("DI_02:ON");
-              id(sim_di_03) = true; send_esp_now_packet("DI_03:ON");
-              id(sim_di_04) = true; send_esp_now_packet("DI_04:ON");
-              id(sim_di_05) = true; send_esp_now_packet("DI_05:ON");
-              id(sim_di_06) = true; send_esp_now_packet("DI_06:ON");
-              id(sim_di_07) = true; send_esp_now_packet("DI_07:ON");
-              id(sim_di_08) = true; send_esp_now_packet("DI_08:ON");
-              id(sim_di_09) = true; send_esp_now_packet("DI_09:ON");
-              id(sim_di_10) = true; send_esp_now_packet("DI_10:ON");
-              id(sim_di_11) = true; send_esp_now_packet("DI_11:ON");
-              id(sim_di_12) = true; send_esp_now_packet("DI_12:ON");
-              id(sim_di_13) = true; send_esp_now_packet("DI_13:ON");
-              id(sim_di_14) = true; send_esp_now_packet("DI_14:ON");
-              id(sim_di_15) = true; send_esp_now_packet("DI_15:ON");
-              id(sim_di_16) = true; send_esp_now_packet("DI_16:ON");
-              id(sim_di_17) = true; send_esp_now_packet("DI_17:ON");
-              id(sim_di_18) = true; send_esp_now_packet("DI_18:ON");
+              id(sim_di_01) = true;
+              id(sim_di_02) = true;
+              id(sim_di_03) = true;
+              id(sim_di_04) = true;
+              id(sim_di_05) = true;
+              id(sim_di_06) = true;
+              id(sim_di_07) = true;
+              id(sim_di_08) = true;
+              id(sim_di_09) = true;
+              id(sim_di_10) = true;
+              id(sim_di_11) = true;
+              id(sim_di_12) = true;
+              id(sim_di_13) = true;
+              id(sim_di_14) = true;
+              id(sim_di_15) = true;
+              id(sim_di_16) = true;
+              id(sim_di_17) = true;
+              id(sim_di_18) = true;
               id(my_display).update();
+              send_esp_now_all(true);
               return;
             }
             // [ALL OFF]
             if (x >= 308 && x <= 386) {
               id(cycle_active) = false;
-              id(sim_di_01) = false; send_esp_now_packet("DI_01:OFF");
-              id(sim_di_02) = false; send_esp_now_packet("DI_02:OFF");
-              id(sim_di_03) = false; send_esp_now_packet("DI_03:OFF");
-              id(sim_di_04) = false; send_esp_now_packet("DI_04:OFF");
-              id(sim_di_05) = false; send_esp_now_packet("DI_05:OFF");
-              id(sim_di_06) = false; send_esp_now_packet("DI_06:OFF");
-              id(sim_di_07) = false; send_esp_now_packet("DI_07:OFF");
-              id(sim_di_08) = false; send_esp_now_packet("DI_08:OFF");
-              id(sim_di_09) = false; send_esp_now_packet("DI_09:OFF");
-              id(sim_di_10) = false; send_esp_now_packet("DI_10:OFF");
-              id(sim_di_11) = false; send_esp_now_packet("DI_11:OFF");
-              id(sim_di_12) = false; send_esp_now_packet("DI_12:OFF");
-              id(sim_di_13) = false; send_esp_now_packet("DI_13:OFF");
-              id(sim_di_14) = false; send_esp_now_packet("DI_14:OFF");
-              id(sim_di_15) = false; send_esp_now_packet("DI_15:OFF");
-              id(sim_di_16) = false; send_esp_now_packet("DI_16:OFF");
-              id(sim_di_17) = false; send_esp_now_packet("DI_17:OFF");
-              id(sim_di_18) = false; send_esp_now_packet("DI_18:OFF");
+              id(sim_di_01) = false;
+              id(sim_di_02) = false;
+              id(sim_di_03) = false;
+              id(sim_di_04) = false;
+              id(sim_di_05) = false;
+              id(sim_di_06) = false;
+              id(sim_di_07) = false;
+              id(sim_di_08) = false;
+              id(sim_di_09) = false;
+              id(sim_di_10) = false;
+              id(sim_di_11) = false;
+              id(sim_di_12) = false;
+              id(sim_di_13) = false;
+              id(sim_di_14) = false;
+              id(sim_di_15) = false;
+              id(sim_di_16) = false;
+              id(sim_di_17) = false;
+              id(sim_di_18) = false;
               id(my_display).update();
+              send_esp_now_all(false);
               return;
             }
             // [CYCLE]
