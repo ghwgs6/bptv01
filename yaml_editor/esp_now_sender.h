@@ -66,8 +66,14 @@ class ESPNowSenderComponent {
     for (int i = 1; i <= 18; i++) {
       sprintf(buf, "DI_%02d:%s", i, state ? "ON" : "OFF");
       send_state(buf);
-      delay(12); // 12ms pacing prevents Wi-Fi RF TX buffer overflow and socket exhaustion on receivers
+      delay(12); // 12ms pacing prevents Wi-Fi RF TX buffer overflow and socket exhaustion
     }
+  }
+
+  void send_bypass(int pin, bool bypassed) {
+    char buf[20];
+    sprintf(buf, "DI_%02d:%s", pin, bypassed ? "BYPASS_ON" : "BYPASS_OFF");
+    send_state(buf);
   }
 };
 
@@ -82,5 +88,11 @@ inline void send_esp_now_packet(const char* msg) {
 inline void send_esp_now_all(bool state) {
   if (global_esp_now_sender) {
     global_esp_now_sender->send_all_zones(state);
+  }
+}
+
+inline void send_esp_now_bypass(int pin, bool bypassed) {
+  if (global_esp_now_sender) {
+    global_esp_now_sender->send_bypass(pin, bypassed);
   }
 }

@@ -2,7 +2,7 @@
 # 7-INCH ESP32-P4 MASTER ALARM RECEIVER DISPLAY
 # Target Chip: ESP32-P4 (1024x600 MIPI-DSI Display + ESP32-C6 Wi-Fi)
 # Comms: Fast UDP Port 4444 Broadcast + Heartbeat Timeout Watchdog
-# Visual Display: 18 Digital Input Zones (Solid GREEN for ON, Solid RED for OFF, OFFLINE Warning on Loss of Comms)
+# Visual Display: 18 Digital Input Zones (Green = ON, Red = OFF, Amber = BYPASSED)
 # -------------------------------------------------------------
 substitutions:
   device_name: esp32-7inch-p4-display
@@ -276,11 +276,14 @@ display:
       // Header Title
       it.print(18, 18, id(font_header), text_white, "18-ZONE ALARM MONITOR & RECEIVER");
 
-      // Count active zones (only valid if online)
+      // Count active unbypassed alarms and bypassed zones
       int active_count = 0;
-      if (is_online) {
+      int bypass_count = 0;
+      if (is_online && global_p4_receiver != nullptr) {
         for (int i = 0; i < 18; i++) {
-          if (global_p4_receiver != nullptr && global_p4_receiver->di_states[i]) {
+          if (global_p4_receiver->di_bypassed[i]) {
+            bypass_count++;
+          } else if (global_p4_receiver->di_states[i]) {
             active_count++;
           }
         }
@@ -300,9 +303,19 @@ display:
         it.print(status_badge_x + status_badge_w / 2, status_badge_y + 8, id(font_medium), blink ? text_white : status_red, TextAlign::TOP_CENTER, "COMMS LOST / OFFLINE");
       } else if (active_count > 0) {
         it.filled_rectangle(status_badge_x, status_badge_y, status_badge_w, status_badge_h, status_green);
-        char act_txt[32];
-        sprintf(act_txt, "ACTIVE: %d / 18 ON", active_count);
+        char act_txt[36];
+        if (bypass_count > 0) {
+          sprintf(act_txt, "ACTIVE: %d | BYP: %d", active_count, bypass_count);
+        } else {
+          sprintf(act_txt, "ACTIVE: %d / 18 ON", active_count);
+        }
         it.print(status_badge_x + status_badge_w / 2, status_badge_y + 8, id(font_medium), bg_color, TextAlign::TOP_CENTER, act_txt);
+      } else if (bypass_count > 0) {
+        it.filled_rectangle(status_badge_x, status_badge_y, status_badge_w, status_badge_h, card_color);
+        it.rectangle(status_badge_x, status_badge_y, status_badge_w, status_badge_h, status_amber);
+        char byp_txt[36];
+        sprintf(byp_txt, "ALL OFF | %d BYPASSED", bypass_count);
+        it.print(status_badge_x + status_badge_w / 2, status_badge_y + 8, id(font_medium), status_amber, TextAlign::TOP_CENTER, byp_txt);
       } else {
         it.filled_rectangle(status_badge_x, status_badge_y, status_badge_w, status_badge_h, card_color);
         it.rectangle(status_badge_x, status_badge_y, status_badge_w, status_badge_h, status_red);
@@ -323,7 +336,7 @@ display:
         wifi::global_wifi_component->get_ip_addresses()[0].str_to(ip_buf);
         it.print(845, 20, id(font_small), text_cyan, ip_buf);
       } else {
-        it.print(845, 20, id(font_small), status_red, "NO IP");
+        it.print(845, 20, id(font_small), status_yellow, "192.168.3.30");
       }
 
       // Stream / Link Status Indicator
@@ -351,15 +364,18 @@ display:
         int x = start_x + col * (card_w + gap_x);
         int y = start_y + row * (card_h + gap_y);
 
+        bool is_bypassed = (global_p4_receiver != nullptr && global_p4_receiver->di_bypassed[i]);
+        bool is_active = (global_p4_receiver != nullptr && global_p4_receiver->di_states[i]);
+
         // Card Container Background & Border
         it.filled_rectangle(x, y, card_w, card_h, card_color);
-        it.rectangle(x, y, card_w, card_h, is_online ? border_color : status_red);
+        it.rectangle(x, y, card_w, card_h, !is_online ? status_red : (is_bypassed ? status_amber : border_color));
 
         // Zone Header
         char zone_lbl[16];
         sprintf(zone_lbl, "ZONE %02d", i + 1);
-        it.print(x + 12, y + 10, id(font_medium), text_white, zone_lbl);
-        it.print(x + card_w - 12, y + 14, id(font_tiny), text_gray, TextAlign::TOP_RIGHT, pin_names[i]);
+        it.print(x + 12, y + 10, id(font_medium), is_bypassed ? status_amber : text_white, zone_lbl);
+        it.print(x + card_w - 12, y + 14, id(font_tiny), is_bypassed ? status_amber : text_gray, TextAlign::TOP_RIGHT, is_bypassed ? "[BYP]" : pin_names[i]);
 
         // Indicator Box (138px x 106px)
         int box_x = x + 10;
@@ -373,10 +389,20 @@ display:
           it.rectangle(box_x, box_y, box_w, box_h, status_red);
           it.print(box_x + box_w / 2, box_y + 24, id(font_large), text_muted, TextAlign::TOP_CENTER, "OFFLINE");
           it.print(box_x + box_w / 2, box_y + 68, id(font_small), status_amber, TextAlign::TOP_CENTER, "NO LINK");
+        } else if (is_bypassed) {
+          // BYPASSED STATE (Amber Visuals)
+          if (is_active) {
+            it.filled_rectangle(box_x, box_y, box_w, box_h, status_amber);
+            it.print(box_x + box_w / 2, box_y + 26, id(font_large), bg_color, TextAlign::TOP_CENTER, "ON");
+            it.print(box_x + box_w / 2, box_y + 68, id(font_small), bg_color, TextAlign::TOP_CENTER, "MUTED (BYP)");
+          } else {
+            it.filled_rectangle(box_x, box_y, box_w, box_h, bg_color);
+            it.rectangle(box_x, box_y, box_w, box_h, status_amber);
+            it.print(box_x + box_w / 2, box_y + 26, id(font_large), status_amber, TextAlign::TOP_CENTER, "BYPASS");
+            it.print(box_x + box_w / 2, box_y + 68, id(font_small), status_amber, TextAlign::TOP_CENTER, "MUTED");
+          }
         } else {
-          bool is_active = (global_p4_receiver != nullptr && global_p4_receiver->di_states[i]);
-
-          // SOLID GREEN FOR ON, SOLID RED FOR OFF
+          // NORMAL STATE: SOLID GREEN FOR ON, SOLID RED FOR OFF
           if (is_active) {
             it.filled_rectangle(box_x, box_y, box_w, box_h, status_green);
             it.print(box_x + box_w / 2, box_y + 26, id(font_large), bg_color, TextAlign::TOP_CENTER, "ON");

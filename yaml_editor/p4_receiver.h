@@ -6,6 +6,7 @@
 class P4ReceiverComponent {
  public:
   bool di_states[18] = {false};
+  bool di_bypassed[18] = {false};
   uint32_t last_packet_time{0};
   int sock_fd_{-1};
   bool comms_online{false};
@@ -24,6 +25,24 @@ class P4ReceiverComponent {
 
     if (msg.rfind("DI_", 0) == 0) {
       int pin_num = std::atoi(msg.substr(3, 2).c_str());
+
+      // Check for Bypass Commands
+      if (msg.find(":BYPASS_ON") != std::string::npos) {
+        if (pin_num >= 1 && pin_num <= 18) {
+          di_bypassed[pin_num - 1] = true;
+          ESP_LOGI("p4_receiver", "Zone DI %02d -> BYPASS ENABLED", pin_num);
+        }
+        return;
+      }
+      if (msg.find(":BYPASS_OFF") != std::string::npos) {
+        if (pin_num >= 1 && pin_num <= 18) {
+          di_bypassed[pin_num - 1] = false;
+          ESP_LOGI("p4_receiver", "Zone DI %02d -> BYPASS DISABLED", pin_num);
+        }
+        return;
+      }
+
+      // Normal State Commands
       bool is_on = (msg.find(":ON") != std::string::npos);
 
       if (pin_num >= 1 && pin_num <= 18) {
@@ -99,37 +118,39 @@ class P4ReceiverComponent {
       close(sock);
       return;
     }
-    
+
     int flags = fcntl(sock, F_GETFL, 0);
     fcntl(sock, F_SETFL, flags | O_NONBLOCK);
     sock_fd_ = sock;
-    ESP_LOGI("p4_receiver", "UDP Receiver bound on Port 4444!");
+    ESP_LOGI("p4_receiver", "Fast non-blocking UDP socket listening on port 4444!");
   }
 
   void loop() {
-    uint32_t now = millis();
-
-    // Comms Timeout Watchdog (6-second timeout)
-    if (comms_online && last_packet_time > 0 && (now - last_packet_time > 6000)) {
-      comms_online = false;
-      ESP_LOGW("p4_receiver", "Comms timeout (>6s without packets). Marking system OFFLINE.");
-      reset_states();
+    if (sock_fd_ < 0) {
+      setup_socket();
     }
 
-    if (sock_fd_ < 0) {
-      static uint32_t last_sock_retry = 0;
-      if (now - last_sock_retry > 2000) {
-        last_sock_retry = now;
-        setup_socket();
-      }
-    } else {
-      char buffer[128];
-      struct sockaddr_in cliaddr;
-      socklen_t len = sizeof(cliaddr);
-      int n = recvfrom(sock_fd_, buffer, sizeof(buffer) - 1, 0, (struct sockaddr *)&cliaddr, &len);
-      if (n > 0) {
-        buffer[n] = '\0';
-        handle_packet(buffer);
+    // Watchdog check: 6 seconds without packet = comms lost
+    if (comms_online && last_packet_time > 0 && (millis() - last_packet_time > 6000)) {
+      comms_online = false;
+      reset_states();
+      ESP_LOGW("p4_receiver", "Comms Watchdog Timeout (>6s) - Comms Lost with Transmitter!");
+    }
+
+    if (sock_fd_ >= 0) {
+      char buffer[256];
+      struct sockaddr_in from_addr;
+      socklen_t from_len = sizeof(from_addr);
+
+      // Drain all pending datagrams
+      while (true) {
+        int len = recvfrom(sock_fd_, buffer, sizeof(buffer) - 1, 0, (struct sockaddr *)&from_addr, &from_len);
+        if (len > 0) {
+          buffer[len] = '\0';
+          handle_packet(buffer);
+        } else {
+          break;
+        }
       }
     }
   }

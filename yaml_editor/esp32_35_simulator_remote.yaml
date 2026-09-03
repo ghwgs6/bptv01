@@ -1,8 +1,7 @@
 # -------------------------------------------------------------
 # ESP32 3.5" TOUCHSCREEN SENSOR SIMULATOR & REMOTE TESTER
 # Target Chip: ESP32-D0WD (3.5" ST7796 480x320 + XPT2046 Touch)
-# Protocol: ESP-NOW Multi-Target Transmitter (DI 01 through DI 18)
-# Controls: Tap any zone to toggle ON/OFF, [ALL ON], [ALL OFF], [CYCLE TEST]
+# Features: Tap for ON/OFF, Long-Press (2s) for BYPASS, [ALL ON], [ALL OFF], [CLR BYP], [CYCLE]
 # -------------------------------------------------------------
 substitutions:
   device_name: esp32-35-simulator-remote
@@ -56,7 +55,7 @@ ota:
 logger:
   level: INFO
 
-# Backlight Control (Supports GPIO27, GPIO21, and GPIO4 across all 3.5" hardware revisions)
+# Backlight Control
 switch:
   - platform: gpio
     pin: GPIO27
@@ -84,9 +83,10 @@ spi:
     miso_pin: GPIO12
 
 # -------------------------------------------------------------
-# 18 SIMULATED DIGITAL INPUT GLOBALS
+# 18 SIMULATED DIGITAL INPUT & BYPASS GLOBALS
 # -------------------------------------------------------------
 globals:
+  # 18 DI States (ON/OFF)
   - id: sim_di_01
     type: bool
     restore_value: no
@@ -159,6 +159,82 @@ globals:
     type: bool
     restore_value: no
     initial_value: 'false'
+
+  # 18 DI Bypass States
+  - id: sim_byp_01
+    type: bool
+    restore_value: no
+    initial_value: 'false'
+  - id: sim_byp_02
+    type: bool
+    restore_value: no
+    initial_value: 'false'
+  - id: sim_byp_03
+    type: bool
+    restore_value: no
+    initial_value: 'false'
+  - id: sim_byp_04
+    type: bool
+    restore_value: no
+    initial_value: 'false'
+  - id: sim_byp_05
+    type: bool
+    restore_value: no
+    initial_value: 'false'
+  - id: sim_byp_06
+    type: bool
+    restore_value: no
+    initial_value: 'false'
+  - id: sim_byp_07
+    type: bool
+    restore_value: no
+    initial_value: 'false'
+  - id: sim_byp_08
+    type: bool
+    restore_value: no
+    initial_value: 'false'
+  - id: sim_byp_09
+    type: bool
+    restore_value: no
+    initial_value: 'false'
+  - id: sim_byp_10
+    type: bool
+    restore_value: no
+    initial_value: 'false'
+  - id: sim_byp_11
+    type: bool
+    restore_value: no
+    initial_value: 'false'
+  - id: sim_byp_12
+    type: bool
+    restore_value: no
+    initial_value: 'false'
+  - id: sim_byp_13
+    type: bool
+    restore_value: no
+    initial_value: 'false'
+  - id: sim_byp_14
+    type: bool
+    restore_value: no
+    initial_value: 'false'
+  - id: sim_byp_15
+    type: bool
+    restore_value: no
+    initial_value: 'false'
+  - id: sim_byp_16
+    type: bool
+    restore_value: no
+    initial_value: 'false'
+  - id: sim_byp_17
+    type: bool
+    restore_value: no
+    initial_value: 'false'
+  - id: sim_byp_18
+    type: bool
+    restore_value: no
+    initial_value: 'false'
+
+  # Mode & Touch Timers
   - id: cycle_active
     type: bool
     restore_value: no
@@ -171,9 +247,21 @@ globals:
     type: uint32_t
     restore_value: no
     initial_value: '0'
+  - id: active_touch_zone
+    type: int
+    restore_value: no
+    initial_value: '-1'
+  - id: touch_press_start
+    type: uint32_t
+    restore_value: no
+    initial_value: '0'
+  - id: bypass_already_triggered
+    type: bool
+    restore_value: no
+    initial_value: 'false'
 
 # -------------------------------------------------------------
-# CONTINUOUS 2-SECOND HEARTBEAT SYNC ENGINE (Paced for 100% Delivery)
+# CONTINUOUS 2-SECOND HEARTBEAT SYNC ENGINE
 # -------------------------------------------------------------
 interval:
   - interval: 2s
@@ -184,11 +272,59 @@ interval:
             id(sim_di_07), id(sim_di_08), id(sim_di_09), id(sim_di_10), id(sim_di_11), id(sim_di_12),
             id(sim_di_13), id(sim_di_14), id(sim_di_15), id(sim_di_16), id(sim_di_17), id(sim_di_18)
           };
-          char buf[16];
+          bool bypasses[18] = {
+            id(sim_byp_01), id(sim_byp_02), id(sim_byp_03), id(sim_byp_04), id(sim_byp_05), id(sim_byp_06),
+            id(sim_byp_07), id(sim_byp_08), id(sim_byp_09), id(sim_byp_10), id(sim_byp_11), id(sim_byp_12),
+            id(sim_byp_13), id(sim_byp_14), id(sim_byp_15), id(sim_byp_16), id(sim_byp_17), id(sim_byp_18)
+          };
+          char buf[24];
           for (int i = 0; i < 18; i++) {
+            // Send State
             sprintf(buf, "DI_%02d:%s", i + 1, states[i] ? "ON" : "OFF");
             send_esp_now_packet(buf);
-            delay(10); // 10ms pacing prevents buffer drops on Wi-Fi radio and receiver FIFO
+            delay(6);
+            // Send Bypass Status
+            sprintf(buf, "DI_%02d:%s", i + 1, bypasses[i] ? "BYPASS_ON" : "BYPASS_OFF");
+            send_esp_now_packet(buf);
+            delay(6);
+          }
+
+  # Touch Release Watcher (Executes Short Tap if released before 2s)
+  - interval: 60ms
+    then:
+      - lambda: |-
+          uint32_t now = millis();
+          if (id(active_touch_zone) >= 0) {
+            // Check if touch has released (>180ms without touch event)
+            if (now - id(last_touch_time) > 180) {
+              int zone = id(active_touch_zone);
+              bool was_bypass = id(bypass_already_triggered);
+              id(active_touch_zone) = -1;
+              id(bypass_already_triggered) = false;
+
+              // If it was NOT a long-press bypass, execute Normal State Toggle!
+              if (!was_bypass) {
+                if (zone == 0) { id(sim_di_01) = !id(sim_di_01); send_esp_now_packet(id(sim_di_01) ? "DI_01:ON" : "DI_01:OFF"); }
+                else if (zone == 1) { id(sim_di_02) = !id(sim_di_02); send_esp_now_packet(id(sim_di_02) ? "DI_02:ON" : "DI_02:OFF"); }
+                else if (zone == 2) { id(sim_di_03) = !id(sim_di_03); send_esp_now_packet(id(sim_di_03) ? "DI_03:ON" : "DI_03:OFF"); }
+                else if (zone == 3) { id(sim_di_04) = !id(sim_di_04); send_esp_now_packet(id(sim_di_04) ? "DI_04:ON" : "DI_04:OFF"); }
+                else if (zone == 4) { id(sim_di_05) = !id(sim_di_05); send_esp_now_packet(id(sim_di_05) ? "DI_05:ON" : "DI_05:OFF"); }
+                else if (zone == 5) { id(sim_di_06) = !id(sim_di_06); send_esp_now_packet(id(sim_di_06) ? "DI_06:ON" : "DI_06:OFF"); }
+                else if (zone == 6) { id(sim_di_07) = !id(sim_di_07); send_esp_now_packet(id(sim_di_07) ? "DI_07:ON" : "DI_07:OFF"); }
+                else if (zone == 7) { id(sim_di_08) = !id(sim_di_08); send_esp_now_packet(id(sim_di_08) ? "DI_08:ON" : "DI_08:OFF"); }
+                else if (zone == 8) { id(sim_di_09) = !id(sim_di_09); send_esp_now_packet(id(sim_di_09) ? "DI_09:ON" : "DI_09:OFF"); }
+                else if (zone == 9) { id(sim_di_10) = !id(sim_di_10); send_esp_now_packet(id(sim_di_10) ? "DI_10:ON" : "DI_10:OFF"); }
+                else if (zone == 10) { id(sim_di_11) = !id(sim_di_11); send_esp_now_packet(id(sim_di_11) ? "DI_11:ON" : "DI_11:OFF"); }
+                else if (zone == 11) { id(sim_di_12) = !id(sim_di_12); send_esp_now_packet(id(sim_di_12) ? "DI_12:ON" : "DI_12:OFF"); }
+                else if (zone == 12) { id(sim_di_13) = !id(sim_di_13); send_esp_now_packet(id(sim_di_13) ? "DI_13:ON" : "DI_13:OFF"); }
+                else if (zone == 13) { id(sim_di_14) = !id(sim_di_14); send_esp_now_packet(id(sim_di_14) ? "DI_14:ON" : "DI_14:OFF"); }
+                else if (zone == 14) { id(sim_di_15) = !id(sim_di_15); send_esp_now_packet(id(sim_di_15) ? "DI_15:ON" : "DI_15:OFF"); }
+                else if (zone == 15) { id(sim_di_16) = !id(sim_di_16); send_esp_now_packet(id(sim_di_16) ? "DI_16:ON" : "DI_16:OFF"); }
+                else if (zone == 16) { id(sim_di_17) = !id(sim_di_17); send_esp_now_packet(id(sim_di_17) ? "DI_17:ON" : "DI_17:OFF"); }
+                else if (zone == 17) { id(sim_di_18) = !id(sim_di_18); send_esp_now_packet(id(sim_di_18) ? "DI_18:ON" : "DI_18:OFF"); }
+                id(my_display).update();
+              }
+            }
           }
 
   # Auto Sequential Cycle Tester (1.5s step)
@@ -353,20 +489,25 @@ display:
       it.filled_rectangle(0, 0, 480, 38, header_color);
       it.line(0, 38, 480, 38, text_cyan);
 
-      it.print(10, 10, id(font_header), text_white, "18-DI REMOTE TESTER");
+      it.print(8, 10, id(font_header), text_white, "18-DI REMOTE");
 
       // [ALL ON] Header Button
-      it.filled_rectangle(232, 4, 72, 30, status_green);
-      it.print(268, 11, id(font_small), bg_color, TextAlign::TOP_CENTER, "ALL ON");
+      it.filled_rectangle(172, 4, 66, 30, status_green);
+      it.print(205, 11, id(font_small), bg_color, TextAlign::TOP_CENTER, "ALL ON");
 
       // [ALL OFF] Header Button
-      it.filled_rectangle(310, 4, 74, 30, status_red);
-      it.print(347, 11, id(font_small), text_white, TextAlign::TOP_CENTER, "ALL OFF");
+      it.filled_rectangle(244, 4, 68, 30, status_red);
+      it.print(278, 11, id(font_small), text_white, TextAlign::TOP_CENTER, "ALL OFF");
+
+      // [CLR BYP] Header Button
+      it.filled_rectangle(318, 4, 76, 30, card_color);
+      it.rectangle(318, 4, 76, 30, status_amber);
+      it.print(356, 11, id(font_small), status_amber, TextAlign::TOP_CENTER, "CLR BYP");
 
       // [CYCLE] Header Button
-      it.filled_rectangle(390, 4, 82, 30, id(cycle_active) ? status_amber : card_color);
-      it.rectangle(390, 4, 82, 30, status_amber);
-      it.print(431, 11, id(font_small), id(cycle_active) ? bg_color : status_amber, TextAlign::TOP_CENTER, id(cycle_active) ? "CYCLING" : "CYCLE");
+      it.filled_rectangle(400, 4, 72, 30, id(cycle_active) ? status_amber : card_color);
+      it.rectangle(400, 4, 72, 30, id(cycle_active) ? status_amber : text_cyan);
+      it.print(436, 11, id(font_small), id(cycle_active) ? bg_color : text_cyan, TextAlign::TOP_CENTER, id(cycle_active) ? "CYCLING" : "CYCLE");
 
       // -------------------------------------------------------------
       // 3. 18-DI Interactive Touch Grid (6 Columns x 3 Rows)
@@ -384,6 +525,12 @@ display:
         id(sim_di_13), id(sim_di_14), id(sim_di_15), id(sim_di_16), id(sim_di_17), id(sim_di_18)
       };
 
+      bool byp_vals[18] = {
+        id(sim_byp_01), id(sim_byp_02), id(sim_byp_03), id(sim_byp_04), id(sim_byp_05), id(sim_byp_06),
+        id(sim_byp_07), id(sim_byp_08), id(sim_byp_09), id(sim_byp_10), id(sim_byp_11), id(sim_byp_12),
+        id(sim_byp_13), id(sim_byp_14), id(sim_byp_15), id(sim_byp_16), id(sim_byp_17), id(sim_byp_18)
+      };
+
       for (int i = 0; i < 18; i++) {
         int col = i % 6;
         int row = i / 6;
@@ -391,18 +538,29 @@ display:
         int by = start_y + row * (btn_h + gap_y);
 
         bool is_on = di_vals[i];
+        bool is_byp = byp_vals[i];
 
         // Button Container
-        it.filled_rectangle(bx, by, btn_w, btn_h, is_on ? status_green : card_color);
-        it.rectangle(bx, by, btn_w, btn_h, is_on ? text_white : border_color);
+        it.filled_rectangle(bx, by, btn_w, btn_h, is_byp ? (is_on ? status_amber : card_color) : (is_on ? status_green : card_color));
+        it.rectangle(bx, by, btn_w, btn_h, is_byp ? status_amber : (is_on ? text_white : border_color));
 
-        // DI Label
+        // DI Label + Bypass Flag
         char lbl[16];
         sprintf(lbl, "DI %02d", i + 1);
-        it.print(bx + btn_w / 2, by + 12, id(font_medium), is_on ? bg_color : text_white, TextAlign::TOP_CENTER, lbl);
+        it.print(bx + 6, by + 10, id(font_medium), is_byp ? status_amber : (is_on ? bg_color : text_white), lbl);
+        if (is_byp) {
+          it.print(bx + btn_w - 6, by + 12, id(font_tiny), status_amber, TextAlign::TOP_RIGHT, "BYP");
+        }
 
         // State Text Box
-        if (is_on) {
+        if (is_byp) {
+          if (is_on) {
+            it.print(bx + btn_w / 2, by + 46, id(font_large), bg_color, TextAlign::TOP_CENTER, "ON");
+          } else {
+            it.rectangle(bx + 6, by + 40, btn_w - 12, 34, status_amber);
+            it.print(bx + btn_w / 2, by + 46, id(font_medium), status_amber, TextAlign::TOP_CENTER, "BYPASS");
+          }
+        } else if (is_on) {
           it.print(bx + btn_w / 2, by + 46, id(font_large), bg_color, TextAlign::TOP_CENTER, "ON");
         } else {
           it.filled_rectangle(bx + 8, by + 40, btn_w - 16, 34, status_red);
@@ -411,7 +569,7 @@ display:
       }
 
 # -------------------------------------------------------------
-# XPT2046 RESISTIVE TOUCHSCREEN CONTROLLER
+# XPT2046 RESISTIVE TOUCHSCREEN (Tap = ON/OFF, Hold 2s = Bypass)
 # -------------------------------------------------------------
 touchscreen:
   - platform: xpt2046
@@ -437,71 +595,65 @@ touchscreen:
     on_touch:
       - lambda: |-
           uint32_t now = millis();
-          if (now - id(last_touch_time) < 400) {
-            return; // 400ms Debounce prevents touch drag/release from bleeding into buttons
-          }
-
           int x = touch.x;
           int y = touch.y;
-          ESP_LOGI("touch", "Touch coordinates: x=%d, y=%d", x, y);
+          id(last_touch_time) = now;
 
           // 1. Header Action Buttons
           if (y >= 2 && y <= 40) {
+            id(active_touch_zone) = -1;
+
             // [ALL ON]
-            if (x >= 230 && x <= 306) {
-              id(last_touch_time) = now;
+            if (x >= 170 && x <= 238) {
               id(cycle_active) = false;
-              id(sim_di_01) = true;
-              id(sim_di_02) = true;
-              id(sim_di_03) = true;
-              id(sim_di_04) = true;
-              id(sim_di_05) = true;
-              id(sim_di_06) = true;
-              id(sim_di_07) = true;
-              id(sim_di_08) = true;
-              id(sim_di_09) = true;
-              id(sim_di_10) = true;
-              id(sim_di_11) = true;
-              id(sim_di_12) = true;
-              id(sim_di_13) = true;
-              id(sim_di_14) = true;
-              id(sim_di_15) = true;
-              id(sim_di_16) = true;
-              id(sim_di_17) = true;
-              id(sim_di_18) = true;
+              id(sim_di_01) = true; id(sim_di_02) = true; id(sim_di_03) = true;
+              id(sim_di_04) = true; id(sim_di_05) = true; id(sim_di_06) = true;
+              id(sim_di_07) = true; id(sim_di_08) = true; id(sim_di_09) = true;
+              id(sim_di_10) = true; id(sim_di_11) = true; id(sim_di_12) = true;
+              id(sim_di_13) = true; id(sim_di_14) = true; id(sim_di_15) = true;
+              id(sim_di_16) = true; id(sim_di_17) = true; id(sim_di_18) = true;
               id(my_display).update();
               send_esp_now_all(true);
               return;
             }
             // [ALL OFF]
-            if (x >= 308 && x <= 386) {
-              id(last_touch_time) = now;
+            if (x >= 242 && x <= 314) {
               id(cycle_active) = false;
-              id(sim_di_01) = false;
-              id(sim_di_02) = false;
-              id(sim_di_03) = false;
-              id(sim_di_04) = false;
-              id(sim_di_05) = false;
-              id(sim_di_06) = false;
-              id(sim_di_07) = false;
-              id(sim_di_08) = false;
-              id(sim_di_09) = false;
-              id(sim_di_10) = false;
-              id(sim_di_11) = false;
-              id(sim_di_12) = false;
-              id(sim_di_13) = false;
-              id(sim_di_14) = false;
-              id(sim_di_15) = false;
-              id(sim_di_16) = false;
-              id(sim_di_17) = false;
-              id(sim_di_18) = false;
+              id(sim_di_01) = false; id(sim_di_02) = false; id(sim_di_03) = false;
+              id(sim_di_04) = false; id(sim_di_05) = false; id(sim_di_06) = false;
+              id(sim_di_07) = false; id(sim_di_08) = false; id(sim_di_09) = false;
+              id(sim_di_10) = false; id(sim_di_11) = false; id(sim_di_12) = false;
+              id(sim_di_13) = false; id(sim_di_14) = false; id(sim_di_15) = false;
+              id(sim_di_16) = false; id(sim_di_17) = false; id(sim_di_18) = false;
               id(my_display).update();
               send_esp_now_all(false);
               return;
             }
+            // [CLR BYP] Clear all bypasses
+            if (x >= 316 && x <= 396) {
+              id(sim_byp_01) = false; send_esp_now_bypass(1, false);
+              id(sim_byp_02) = false; send_esp_now_bypass(2, false);
+              id(sim_byp_03) = false; send_esp_now_bypass(3, false);
+              id(sim_byp_04) = false; send_esp_now_bypass(4, false);
+              id(sim_byp_05) = false; send_esp_now_bypass(5, false);
+              id(sim_byp_06) = false; send_esp_now_bypass(6, false);
+              id(sim_byp_07) = false; send_esp_now_bypass(7, false);
+              id(sim_byp_08) = false; send_esp_now_bypass(8, false);
+              id(sim_byp_09) = false; send_esp_now_bypass(9, false);
+              id(sim_byp_10) = false; send_esp_now_bypass(10, false);
+              id(sim_byp_11) = false; send_esp_now_bypass(11, false);
+              id(sim_byp_12) = false; send_esp_now_bypass(12, false);
+              id(sim_byp_13) = false; send_esp_now_bypass(13, false);
+              id(sim_byp_14) = false; send_esp_now_bypass(14, false);
+              id(sim_byp_15) = false; send_esp_now_bypass(15, false);
+              id(sim_byp_16) = false; send_esp_now_bypass(16, false);
+              id(sim_byp_17) = false; send_esp_now_bypass(17, false);
+              id(sim_byp_18) = false; send_esp_now_bypass(18, false);
+              id(my_display).update();
+              return;
+            }
             // [CYCLE]
-            if (x >= 388 && x <= 478) {
-              id(last_touch_time) = now;
+            if (x >= 398 && x <= 478) {
               id(cycle_active) = !id(cycle_active);
               id(cycle_step) = 0;
               id(my_display).update();
@@ -509,7 +661,7 @@ touchscreen:
             }
           }
 
-          // 2. 18-DI Buttons Grid
+          // 2. 18-DI Buttons Grid (Tap = ON/OFF, Hold 2s = Toggle Bypass)
           int start_x = 8;
           int start_y = 44;
           int btn_w = 72;
@@ -524,27 +676,36 @@ touchscreen:
             int by = start_y + row * (btn_h + gap_y);
 
             if (x >= bx && x <= bx + btn_w && y >= by && y <= by + btn_h) {
-              id(last_touch_time) = now;
               id(cycle_active) = false;
-              if (i == 0) { id(sim_di_01) = !id(sim_di_01); send_esp_now_packet(id(sim_di_01) ? "DI_01:ON" : "DI_01:OFF"); }
-              else if (i == 1) { id(sim_di_02) = !id(sim_di_02); send_esp_now_packet(id(sim_di_02) ? "DI_02:ON" : "DI_02:OFF"); }
-              else if (i == 2) { id(sim_di_03) = !id(sim_di_03); send_esp_now_packet(id(sim_di_03) ? "DI_03:ON" : "DI_03:OFF"); }
-              else if (i == 3) { id(sim_di_04) = !id(sim_di_04); send_esp_now_packet(id(sim_di_04) ? "DI_04:ON" : "DI_04:OFF"); }
-              else if (i == 4) { id(sim_di_05) = !id(sim_di_05); send_esp_now_packet(id(sim_di_05) ? "DI_05:ON" : "DI_05:OFF"); }
-              else if (i == 5) { id(sim_di_06) = !id(sim_di_06); send_esp_now_packet(id(sim_di_06) ? "DI_06:ON" : "DI_06:OFF"); }
-              else if (i == 6) { id(sim_di_07) = !id(sim_di_07); send_esp_now_packet(id(sim_di_07) ? "DI_07:ON" : "DI_07:OFF"); }
-              else if (i == 7) { id(sim_di_08) = !id(sim_di_08); send_esp_now_packet(id(sim_di_08) ? "DI_08:ON" : "DI_08:OFF"); }
-              else if (i == 8) { id(sim_di_09) = !id(sim_di_09); send_esp_now_packet(id(sim_di_09) ? "DI_09:ON" : "DI_09:OFF"); }
-              else if (i == 9) { id(sim_di_10) = !id(sim_di_10); send_esp_now_packet(id(sim_di_10) ? "DI_10:ON" : "DI_10:OFF"); }
-              else if (i == 10) { id(sim_di_11) = !id(sim_di_11); send_esp_now_packet(id(sim_di_11) ? "DI_11:ON" : "DI_11:OFF"); }
-              else if (i == 11) { id(sim_di_12) = !id(sim_di_12); send_esp_now_packet(id(sim_di_12) ? "DI_12:ON" : "DI_12:OFF"); }
-              else if (i == 12) { id(sim_di_13) = !id(sim_di_13); send_esp_now_packet(id(sim_di_13) ? "DI_13:ON" : "DI_13:OFF"); }
-              else if (i == 13) { id(sim_di_14) = !id(sim_di_14); send_esp_now_packet(id(sim_di_14) ? "DI_14:ON" : "DI_14:OFF"); }
-              else if (i == 14) { id(sim_di_15) = !id(sim_di_15); send_esp_now_packet(id(sim_di_15) ? "DI_15:ON" : "DI_15:OFF"); }
-              else if (i == 15) { id(sim_di_16) = !id(sim_di_16); send_esp_now_packet(id(sim_di_16) ? "DI_16:ON" : "DI_16:OFF"); }
-              else if (i == 16) { id(sim_di_17) = !id(sim_di_17); send_esp_now_packet(id(sim_di_17) ? "DI_17:ON" : "DI_17:OFF"); }
-              else if (i == 17) { id(sim_di_18) = !id(sim_di_18); send_esp_now_packet(id(sim_di_18) ? "DI_18:ON" : "DI_18:OFF"); }
-              id(my_display).update();
+
+              if (id(active_touch_zone) != i) {
+                // New touch started on zone i
+                id(active_touch_zone) = i;
+                id(touch_press_start) = now;
+                id(bypass_already_triggered) = false;
+              } else if (!id(bypass_already_triggered) && (now - id(touch_press_start) >= 2000)) {
+                // HELD FOR >= 2 SECONDS: TOGGLE BYPASS!
+                id(bypass_already_triggered) = true;
+                if (i == 0) { id(sim_byp_01) = !id(sim_byp_01); send_esp_now_bypass(1, id(sim_byp_01)); }
+                else if (i == 1) { id(sim_byp_02) = !id(sim_byp_02); send_esp_now_bypass(2, id(sim_byp_02)); }
+                else if (i == 2) { id(sim_byp_03) = !id(sim_byp_03); send_esp_now_bypass(3, id(sim_byp_03)); }
+                else if (i == 3) { id(sim_byp_04) = !id(sim_byp_04); send_esp_now_bypass(4, id(sim_byp_04)); }
+                else if (i == 4) { id(sim_byp_05) = !id(sim_byp_05); send_esp_now_bypass(5, id(sim_byp_05)); }
+                else if (i == 5) { id(sim_byp_06) = !id(sim_byp_06); send_esp_now_bypass(6, id(sim_byp_06)); }
+                else if (i == 6) { id(sim_byp_07) = !id(sim_byp_07); send_esp_now_bypass(7, id(sim_byp_07)); }
+                else if (i == 7) { id(sim_byp_08) = !id(sim_byp_08); send_esp_now_bypass(8, id(sim_byp_08)); }
+                else if (i == 8) { id(sim_byp_09) = !id(sim_byp_09); send_esp_now_bypass(9, id(sim_byp_09)); }
+                else if (i == 9) { id(sim_byp_10) = !id(sim_byp_10); send_esp_now_bypass(10, id(sim_byp_10)); }
+                else if (i == 10) { id(sim_byp_11) = !id(sim_byp_11); send_esp_now_bypass(11, id(sim_byp_11)); }
+                else if (i == 11) { id(sim_byp_12) = !id(sim_byp_12); send_esp_now_bypass(12, id(sim_byp_12)); }
+                else if (i == 12) { id(sim_byp_13) = !id(sim_byp_13); send_esp_now_bypass(13, id(sim_byp_13)); }
+                else if (i == 13) { id(sim_byp_14) = !id(sim_byp_14); send_esp_now_bypass(14, id(sim_byp_14)); }
+                else if (i == 14) { id(sim_byp_15) = !id(sim_byp_15); send_esp_now_bypass(15, id(sim_byp_15)); }
+                else if (i == 15) { id(sim_byp_16) = !id(sim_byp_16); send_esp_now_bypass(16, id(sim_byp_16)); }
+                else if (i == 16) { id(sim_byp_17) = !id(sim_byp_17); send_esp_now_bypass(17, id(sim_byp_17)); }
+                else if (i == 17) { id(sim_byp_18) = !id(sim_byp_18); send_esp_now_bypass(18, id(sim_byp_18)); }
+                id(my_display).update();
+              }
               break;
             }
           }
